@@ -1,1 +1,1 @@
-source env.sh && cargo build --release
+source ~/Projects/synth/scripts/env.sh && cargo build --release
