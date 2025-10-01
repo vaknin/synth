@@ -1,7 +1,5 @@
 #![allow(dead_code)]
 
-use log::info;
-
 /// High-quality 1024-sample sine wave lookup table.
 /// Values are normalized to the range -1.0 to 1.0 for clean DSP processing.
 #[allow(clippy::approx_constant)]
