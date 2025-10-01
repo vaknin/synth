@@ -16,10 +16,7 @@
 #![no_std]
 #![no_main]
 
-// use core::sync::atomic::{AtomicI32, Ordering};
-
 use embassy_executor::Spawner;
-// use embassy_time::{Duration, Timer};
 use esp_backtrace as _;
 use esp_hal::{
     dma_circular_buffers,
@@ -27,13 +24,15 @@ use esp_hal::{
     time::Rate,
     timer::timg::TimerGroup,
 };
-// use log::info;
-use synth::{audio_util::f32_to_i16_le, oscillator::Oscillator};
+use heapless::spsc::Queue;
+use synth::{
+    audio_util::f32_to_i16_le,
+    config::*,
+    engine::Engine,
+    message::Message,
+};
 
 esp_bootloader_esp_idf::esp_app_desc!();
-
-const SAMPLE_RATE: u32 = 44_100;
-// static COUNTER: AtomicI32 = AtomicI32::new(0);
 
 #[esp_hal_embassy::main]
 async fn main(_spawner: Spawner) {
@@ -45,8 +44,19 @@ async fn main(_spawner: Spawner) {
     esp_hal_embassy::init(timg0.timer0);
     let dma_channel = peripherals.DMA_CH0;
 
+    // Create SPSC queue for control → audio messages
+    static MESSAGE_QUEUE: static_cell::StaticCell<Queue<Message, MESSAGE_QUEUE_SIZE>> = static_cell::StaticCell::new();
+    let queue = MESSAGE_QUEUE.init(Queue::new());
+    let (mut producer, mut consumer) = queue.split();
+
+    // Create synth engine
+    let mut engine = Engine::new(SAMPLE_RATE as f32);
+    producer.enqueue(Message::ToggleVoice(0)).ok();
+    producer.enqueue(Message::SelectVoice(0)).ok();
+    producer.enqueue(Message::SetVolume(1.)).ok();
+
     #[allow(clippy::manual_div_ceil)]
-    let (_, _, tx_buffer, tx_descriptors) = dma_circular_buffers!(0, 1024); // %12 == 0, matches docs example 2040,4096,1024
+    let (_, _, tx_buffer, tx_descriptors) = dma_circular_buffers!(0, DMA_BUFFER_SIZE); // %12 == 0, matches docs example 2040,4096,1024
     let i2s_tx = I2s::new(
         peripherals.I2S0,
         Standard::Philips,
@@ -61,46 +71,32 @@ async fn main(_spawner: Spawner) {
     .with_dout(peripherals.GPIO9)
     .build(tx_descriptors);
 
-    // Create oscillator at 220Hz (A3 note)
-    const FREQUENCY: f32 = 30.0;
-    let mut oscillator = Oscillator::new(FREQUENCY, SAMPLE_RATE as f32);
-
-    // Log oscillator diagnostics
-    // let (phase_inc, samples_per_cycle, actual_freq) = oscillator.diagnostics();
-    // info!("Oscillator config:");
-    // info!("  Phase increment: {}", phase_inc);
-    // info!("  Samples per cycle: {}", samples_per_cycle);
-    // info!("  Actual frequency: {} Hz", actual_freq);
-    // info!("DMA buffer size: {} bytes ({} stereo samples)", tx_buffer.len(), tx_buffer.len() / 4);
-
-    // // Test: generate a few samples to verify oscillator
-    // info!("First 10 samples from oscillator:");
-    // for i in 0..10 {
-    //     let sample = oscillator.tick();
-    //     info!("  Sample {}: {}", i, sample);
-    // }
+    // TODO: Add ADC setup for pots (frequency + volume control)
+    // TODO: Add GPIO button handling for voice selection/toggle
 
     let mut transaction = i2s_tx.write_dma_circular_async(tx_buffer).unwrap();
 
     loop {
-        // oscillator.set_frequency(oscillator.frequency+0.05);
-        let _result = transaction.push_with(|buffer| {
-            
+        transaction.push_with(|buffer| {
             // Verify buffer meets minimum stereo frame size
             if buffer.len() < 4 {
                 return 0;
             }
-            
-            // COUNTER.fetch_add(1, Ordering::Release);
 
-            // Get iterator that separates complete chunks from remainder
+            // --- MESSAGE PROCESSING ---
+            // Drain all pending messages from queue and process sequentially
+            while let Some(msg) = consumer.dequeue() {
+                engine.process_message(msg);
+            }
+
+            // --- AUDIO GENERATION ---
             let remainder = buffer.len() % 4;
             let mut chunks = buffer.chunks_exact_mut(4);
 
             // Process all complete 4-byte chunks (stereo i16: 2 bytes × 2 channels)
             for chunk in &mut chunks {
-                // Generate one f32 sample from oscillator (-1.0 to 1.0)
-                let sample = oscillator.tick();
+                // Generate mixed sample from all voices
+                let sample = engine.tick();
 
                 // Convert to i16 little-endian bytes
                 let bytes = f32_to_i16_le(sample);
@@ -113,16 +109,8 @@ async fn main(_spawner: Spawner) {
                 chunk[2] = bytes[0];
                 chunk[3] = bytes[1];
             }
-            
+
             buffer.len() - remainder
-        }).await;
+        }).await.ok();
     }
 }
-
-// #[embassy_executor::task]
-// async fn mytask(osc: Oscillator) {
-//     loop {
-//         Timer::after(Duration::from_secs(1)).await;
-//         osc.set_frequency(osc.frequency + 50f32);
-//     }
-// }

@@ -6,3 +6,6 @@
 # Project Values
 
 - We highly value audio quality, best practices, speed, and efficiency.
+
+- Always build with ./scripts/build.sh
+- Always use modern and idiomatic Rust

@@ -146,7 +146,7 @@ pub struct Oscillator {
     sample_rate: f32,
     /// Reference to the wavetable (normalized f32 values)
     wavetable: &'static [f32],
-    pub frequency: f32
+    frequency: f32
 }
 
 impl Oscillator {
@@ -164,15 +164,6 @@ impl Oscillator {
             wavetable: &SINE,
             frequency
         }
-    }
-
-    /// Get diagnostic information about the oscillator.
-    /// can delete later probably
-    #[allow(dead_code)]
-    pub fn diagnostics(&self) -> (f32, f32, f32) {
-        let samples_per_cycle = 1.0 / self.phase_increment;
-        let actual_frequency = self.sample_rate / samples_per_cycle;
-        (self.phase_increment, samples_per_cycle, actual_frequency)
     }
 
     /// Change the oscillator's frequency.
