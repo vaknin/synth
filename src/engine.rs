@@ -1,8 +1,10 @@
 //! Engine module: manages voices, processes messages, renders audio.
 
-use crate::config::{VOICE_COUNT, STARTING_FREQUENCY};
+use crate::audio_util::f32_to_i16_le;
+use crate::config::{VOICE_COUNT, STARTING_FREQUENCY, MASTER_GAIN};
 use crate::message::Message;
 use crate::voice::Voice;
+use heapless::spsc::Consumer;
 
 /// Main synth engine managing all voices.
 pub struct Engine {
@@ -70,9 +72,39 @@ impl Engine {
     /// Generate next mixed audio sample from all voices.
     ///
     /// # Returns
-    /// Sum of all active voices normalized by VOICE_COUNT to prevent clipping
+    /// Sum of all active voices with master gain applied
     pub fn tick(&mut self) -> f32 {
         let sum: f32 = self.voices.iter_mut().map(|v| v.tick()).sum();
-        sum / VOICE_COUNT as f32
+        (sum / VOICE_COUNT as f32) * MASTER_GAIN
+    }
+
+    /// Render audio into provided buffer.
+    ///
+    /// Processes all pending control messages, generates audio samples,
+    /// converts to i16 stereo format, and writes to buffer.
+    ///
+    /// # Arguments
+    /// * `consumer` - Consumer end of message queue for processing control messages
+    /// * `buffer` - Output buffer for i16 LE stereo audio (must be multiple of 4 bytes)
+    ///
+    /// # Returns
+    /// Number of bytes written to buffer (will be multiple of 4)
+    pub fn render(&mut self, consumer: &mut Consumer<'static, Message>, buffer: &mut [u8]) -> usize {
+        if buffer.len() < 4 {
+            return 0;
+        }
+
+        // Process all pending control messages
+        while let Some(msg) = consumer.dequeue() {
+            self.process_message(msg);
+        }
+
+        // Generate audio for each stereo frame
+        for chunk in buffer.chunks_exact_mut(4) {
+            let bytes = f32_to_i16_le(self.tick());
+            chunk.copy_from_slice(&[bytes[0], bytes[1], bytes[0], bytes[1]]);
+        }
+
+        buffer.len() - (buffer.len() % 4)
     }
 }
