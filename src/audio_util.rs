@@ -11,6 +11,7 @@
 /// Two bytes representing the i16 sample in little-endian format
 #[inline]
 pub fn f32_to_i16_le(sample: f32) -> [u8; 2] {
-    let sample_i16 = (sample.clamp(-1.0, 1.0) * 32767.0) as i16;
+    debug_assert!((-1. ..=1.).contains(&sample)); // -1 <= sample <= 1
+    let sample_i16 = (sample * (i16::MAX as f32)) as i16;
     sample_i16.to_le_bytes()
 }

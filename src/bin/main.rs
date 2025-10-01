@@ -16,10 +16,10 @@
 #![no_std]
 #![no_main]
 
-use core::sync::atomic::{AtomicI32, Ordering};
+// use core::sync::atomic::{AtomicI32, Ordering};
 
 use embassy_executor::Spawner;
-use embassy_time::{Duration, Timer};
+// use embassy_time::{Duration, Timer};
 use esp_backtrace as _;
 use esp_hal::{
     dma_circular_buffers,
@@ -27,16 +27,16 @@ use esp_hal::{
     time::Rate,
     timer::timg::TimerGroup,
 };
-use log::info;
+// use log::info;
 use synth::{audio_util::f32_to_i16_le, oscillator::Oscillator};
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
 const SAMPLE_RATE: u32 = 44_100;
-static COUNTER: AtomicI32 = AtomicI32::new(0);
+// static COUNTER: AtomicI32 = AtomicI32::new(0);
 
 #[esp_hal_embassy::main]
-async fn main(spawner: Spawner) {
+async fn main(_spawner: Spawner) {
     // Initialize logger
     esp_println::logger::init_logger_from_env();
 
@@ -46,7 +46,7 @@ async fn main(spawner: Spawner) {
     let dma_channel = peripherals.DMA_CH0;
 
     #[allow(clippy::manual_div_ceil)]
-    let (_, _, tx_buffer, tx_descriptors) = dma_circular_buffers!(0, 2052); // %12 == 0, matches docs example
+    let (_, _, tx_buffer, tx_descriptors) = dma_circular_buffers!(0, 1024); // %12 == 0, matches docs example 2040,4096,1024
     let i2s_tx = I2s::new(
         peripherals.I2S0,
         Standard::Philips,
@@ -62,7 +62,7 @@ async fn main(spawner: Spawner) {
     .build(tx_descriptors);
 
     // Create oscillator at 220Hz (A3 note)
-    const FREQUENCY: f32 = 20.0;
+    const FREQUENCY: f32 = 30.0;
     let mut oscillator = Oscillator::new(FREQUENCY, SAMPLE_RATE as f32);
 
     // Log oscillator diagnostics
@@ -83,7 +83,7 @@ async fn main(spawner: Spawner) {
     let mut transaction = i2s_tx.write_dma_circular_async(tx_buffer).unwrap();
 
     loop {
-        oscillator.set_frequency(oscillator.frequency+0.05);
+        // oscillator.set_frequency(oscillator.frequency+0.05);
         let _result = transaction.push_with(|buffer| {
             
             // Verify buffer meets minimum stereo frame size
@@ -91,7 +91,7 @@ async fn main(spawner: Spawner) {
                 return 0;
             }
             
-            COUNTER.fetch_add(1, Ordering::Release);
+            // COUNTER.fetch_add(1, Ordering::Release);
 
             // Get iterator that separates complete chunks from remainder
             let remainder = buffer.len() % 4;
