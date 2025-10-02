@@ -1,9 +1,10 @@
 //! Engine module: manages voices, processes messages, renders audio.
 
-use crate::config::{VOICE_COUNT, STARTING_FREQUENCY, MASTER_GAIN};
+use crate::config::{MESSAGE_QUEUE_SIZE, VOICE_COUNT, STARTING_FREQUENCY, MASTER_GAIN};
 use crate::message::Message;
 use crate::voice::Voice;
-use heapless::spsc::Consumer;
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_sync::channel::Receiver;
 
 /// Main synth engine managing all voices.
 pub struct Engine {
@@ -16,21 +17,29 @@ pub struct Engine {
     /// Audio sample rate (stored for future use in filters/effects)
     #[allow(dead_code)]
     sample_rate: f32,
+
+    /// Message receiver from control tasks
+    receiver: Receiver<'static, CriticalSectionRawMutex, Message, MESSAGE_QUEUE_SIZE>,
 }
 
 impl Engine {
-    /// Create new engine with initialized voices.
+    /// Create new engine with initialized voices and message receiver.
     ///
     /// # Arguments
     /// * `sample_rate` - Audio sample rate in Hz
+    /// * `receiver` - Embassy channel receiver for control messages
     ///
     /// # Returns
     /// Engine with VOICE_COUNT voices at STARTING_FREQUENCY, inactive, no selection
-    pub fn new(sample_rate: f32) -> Self {
+    pub fn new(
+        sample_rate: f32,
+        receiver: Receiver<'static, CriticalSectionRawMutex, Message, MESSAGE_QUEUE_SIZE>,
+    ) -> Self {
         Self {
             voices: core::array::from_fn(|_| Voice::new(STARTING_FREQUENCY, sample_rate)),
             selected_voice: None,
             sample_rate,
+            receiver,
         }
     }
 
@@ -83,18 +92,17 @@ impl Engine {
     /// converts to i16 stereo format, and writes to buffer.
     ///
     /// # Arguments
-    /// * `consumer` - Consumer end of message queue for processing control messages
     /// * `buffer` - Output buffer for i16 LE stereo audio (must be multiple of 4 bytes)
     ///
     /// # Returns
     /// Number of bytes written to buffer (will be multiple of 4)
-    pub fn render(&mut self, consumer: &mut Consumer<'static, Message>, buffer: &mut [u8]) -> usize {
+    pub fn render(&mut self, buffer: &mut [u8]) -> usize {
         if buffer.len() < 4 {
             return 0;
         }
 
-        // Process all pending control messages
-        while let Some(msg) = consumer.dequeue() {
+        // Process all pending control messages (non-blocking)
+        while let Ok(msg) = self.receiver.try_receive() {
             self.process_message(msg);
         }
 

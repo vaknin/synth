@@ -1,7 +1,7 @@
 //! polyphonic synthesizer for ESP32-S3
 //!
 //! Architecture:
-//! - Lock-free SPSC queue for control messages
+//! - Embassy MPSC channel for control messages (multiple producers → engine)
 //! - Engine handles synthesis + rendering
 //! - Embassy async for event-driven DMA
 
@@ -9,44 +9,36 @@
 #![no_main]
 
 use embassy_executor::Spawner;
-use embassy_sync::channel::Channel;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex as ChannelMutex;
-
-
-// use embassy_time::{Duration, Timer};
+use embassy_sync::channel::Channel;
 use esp_backtrace as _;
-use esp_hal::{
-    dma_circular_buffers,
-    gpio::{Input, Output, Pull},
-    timer::timg::TimerGroup,
-};
-// use heapless::spsc::Queue;
+use esp_hal::{dma_circular_buffers, timer::timg::TimerGroup};
 use synth::{config::*, engine::Engine, hardware, message::Message};
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
-pub type CtrlSender   = Sender<'static, ChannelMutex, Message, MESSAGE_QUEUE_SIZE>;
-pub type CtrlReceiver = Receiver<'static, ChannelMutex, Message, MESSAGE_QUEUE_SIZE>;
-
+/// Global MPSC channel for control → audio communication
 static CHANNEL: Channel<ChannelMutex, Message, MESSAGE_QUEUE_SIZE> = Channel::new();
 
 #[esp_hal_embassy::main]
 async fn main(spawner: Spawner) {
     // Initialize logger
     esp_println::logger::init_logger_from_env();
-    
+
     let peripherals = esp_hal::init(esp_hal::Config::default());
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     esp_hal_embassy::init(timg0.timer0);
     let dma_channel = peripherals.DMA_CH0;
-    
-    // Create MPSC Channel
-    let consumer = CHANNEL.receiver();
-    let freq_producer = CHANNEL.sender();
-    let vol_producer = CHANNEL.sender();
 
-    // Create synth engine
-    let mut engine = Engine::new(SAMPLE_RATE as f32);
+    // Get channel endpoints
+    let receiver = CHANNEL.receiver();
+    let sender = CHANNEL.sender();
+
+    // Create synth engine with receiver
+    sender.send(Message::ToggleVoice(0)).await;
+    sender.send(Message::SelectVoice(0)).await;
+    sender.send(Message::SetVolume(1.0)).await;
+    let mut engine = Engine::new(SAMPLE_RATE as f32, receiver);
 
     // Initialize I2S audio hardware
     #[allow(clippy::manual_div_ceil)]
@@ -62,15 +54,21 @@ async fn main(spawner: Spawner) {
     );
 
     // Initialize ADC for potentiometers (freq on GPIO1, vol on GPIO2)
-    let adc_ctrl = hardware::setup_adc(peripherals.ADC1, peripherals.GPIO1, peripherals.GPIO2);
+    let (adc_bus, freq_pin, vol_pin) = hardware::setup_adc(
+        peripherals.ADC1,
+        peripherals.GPIO1,
+        peripherals.GPIO2,
+    );
 
-    // Spawn control task to read both potentiometers
-    spawner.spawn(synth::controls::control_task(producer, adc_ctrl)).unwrap();
+    // Spawn pot task to read both potentiometers
+    spawner
+        .spawn(synth::controls::pot_task(sender, adc_bus, freq_pin, vol_pin))
+        .unwrap();
 
     // Audio rendering loop
     loop {
         audio_stream
-            .push_with(|buffer| engine.render(&mut consumer, buffer))
+            .push_with(|buffer| engine.render(buffer))
             .await
             .ok();
     }

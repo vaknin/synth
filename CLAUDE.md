@@ -7,7 +7,8 @@
 # Project Values
 
 - We highly value audio quality, best practices, speed, and efficiency.
-
-- Always build with ./scripts/build.sh
 - Always use modern and idiomatic Rust
+
+# Guidelines
+- Always build with ./scripts/build.sh
 - When adding new crates, make sure they're the latest version possible

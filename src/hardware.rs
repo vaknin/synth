@@ -1,7 +1,13 @@
 //! Hardware initialization and configuration.
 
 use esp_hal::{
-    analog::adc::{Adc, AdcCalCurve, AdcConfig, AdcPin, Attenuation}, dma::DmaDescriptor, i2s::master::{asynch::I2sWriteDmaTransferAsync, DataFormat, I2s, Standard}, peripherals::ADC1, time::Rate, Blocking
+    analog::adc::{Adc, AdcCalCurve, AdcChannel, AdcConfig, AdcPin, Attenuation},
+    dma::DmaDescriptor,
+    gpio::AnalogPin,
+    i2s::master::{asynch::I2sWriteDmaTransferAsync, DataFormat, I2s, Standard},
+    peripherals::ADC1,
+    time::Rate,
+    Blocking,
 };
 use crate::config::SAMPLE_RATE;
 
@@ -66,7 +72,11 @@ pub fn setup_adc<PF, PV>(
     adc1: ADC1<'static>,
     gpio_freq: PF,
     gpio_vol: PV,
-) -> (AdcBus, PotPin<PF>, PotPin<PV>) {
+) -> (AdcBus, PotPin<PF>, PotPin<PV>)
+where
+    PF: AdcChannel + AnalogPin,
+    PV: AdcChannel + AnalogPin,
+{
     let mut cfg = AdcConfig::new();
 
     // 11 dB → full 0–3.3V, with curve calibration
