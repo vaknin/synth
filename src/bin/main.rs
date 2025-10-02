@@ -34,14 +34,14 @@ async fn main(spawner: Spawner) {
     // Create SPSC queue for control → audio messages
     static MESSAGE_QUEUE: static_cell::StaticCell<Queue<Message, MESSAGE_QUEUE_SIZE>> = static_cell::StaticCell::new();
     let queue = MESSAGE_QUEUE.init(Queue::new());
-    let (producer, mut consumer) = queue.split();
+    let (mut producer, mut consumer) = queue.split();
 
     // Create synth engine
     let mut engine = Engine::new(SAMPLE_RATE as f32);
 
     // Setup button and LED for voice 0
-    let button0 = Input::new(peripherals.GPIO10, Pull::Up);
-    let led0 = Output::new(peripherals.GPIO11, esp_hal::gpio::Level::Low);
+    // let button0 = Input::new(peripherals.GPIO10, Pull::Up);
+    // let led0 = Output::new(peripherals.GPIO11, esp_hal::gpio::Level::Low);
 
     // Debug: initialize voice 0 for testing
     producer.enqueue(Message::ToggleVoice(0)).ok();

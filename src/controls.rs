@@ -136,45 +136,45 @@ pub async fn control_task(
     }
 }
 
-/// Button control task for a single voice.
-///
-/// Handles button press with toggle logic:
-/// - First press: Select voice
-/// - Second press (when already selected): Toggle voice on/off
-///
-/// # Arguments
-/// * `producer` - Message queue producer for sending control messages
-/// * `button` - GPIO input configured with pull-up (active-low)
-/// * `led` - GPIO output for visual feedback
-/// * `voice_idx` - Voice index (0-2)
-#[embassy_executor::task]
-pub async fn button_task(
-    mut producer: heapless::spsc::Producer<'static, Message, MESSAGE_QUEUE_SIZE>,
-    mut button: Input<'static>,
-    mut led: Output<'static>,
-    voice_idx: u8,
-) {
-    let mut is_selected = false;
+// / Button control task for a single voice.
+// /
+// / Handles button press with toggle logic:
+// / - First press: Select voice
+// / - Second press (when already selected): Toggle voice on/off
+// /
+// / # Arguments
+// / * `producer` - Message queue producer for sending control messages
+// / * `button` - GPIO input configured with pull-up (active-low)
+// / * `led` - GPIO output for visual feedback
+// / * `voice_idx` - Voice index (0-2)
+// #[embassy_executor::task]
+// pub async fn button_task(
+//     mut producer: heapless::spsc::Producer<'static, Message, MESSAGE_QUEUE_SIZE>,
+//     mut button: Input<'static>,
+//     mut led: Output<'static>,
+//     voice_idx: u8,
+// ) {
+//     let mut is_selected = false;
 
-    loop {
-        // Wait for button press (active-low, so wait for LOW)
-        button.wait_for_low().await;
-        info!("Button {} pressed!", voice_idx);
+//     loop {
+//         // Wait for button press (active-low, so wait for LOW)
+//         button.wait_for_low().await;
+//         info!("Button {} pressed!", voice_idx);
 
-        if !is_selected {
-            // First press: select voice
-            producer.enqueue(Message::SelectVoice(voice_idx)).ok();
-            led.set_high();
-            is_selected = true;
-            info!("Voice {} selected", voice_idx);
-        } else {
-            // Second press: toggle voice on/off
-            producer.enqueue(Message::ToggleVoice(voice_idx)).ok();
-            info!("Voice {} toggled", voice_idx);
-        }
+//         if !is_selected {
+//             // First press: select voice
+//             producer.enqueue(Message::SelectVoice(voice_idx)).ok();
+//             led.set_high();
+//             is_selected = true;
+//             info!("Voice {} selected", voice_idx);
+//         } else {
+//             // Second press: toggle voice on/off
+//             producer.enqueue(Message::ToggleVoice(voice_idx)).ok();
+//             info!("Voice {} toggled", voice_idx);
+//         }
 
-        // Wait for button release before next press
-        button.wait_for_high().await;
-        info!("Button {} released", voice_idx);
-    }
-}
+//         // Wait for button release before next press
+//         button.wait_for_high().await;
+//         info!("Button {} released", voice_idx);
+//     }
+// }
