@@ -28,15 +28,19 @@ pub async fn pot_task(
     mut vol_pin: PotPin<esp_hal::peripherals::GPIO2<'static>>,
 ) {
     // Create pot state objects with mapping functions and deadbands
-    let mut freq_pot = Potentiometer::new(map_freq, POT_CHANGE_THRESHOLD);
-    let mut vol_pot = Potentiometer::new(map_vol, POT_CHANGE_THRESHOLD);
+    let mut freq_pot = Potentiometer::new(map_freq);
+    let mut vol_pot = Potentiometer::new(map_vol);
 
     loop {
         // Poll frequency pot (GPIO1)
-        freq_pot.poll_and_send(&sender, &mut adc_bus.adc, &mut freq_pin).await;
+        freq_pot
+            .poll_and_send(sender, &mut adc_bus.adc, &mut freq_pin)
+            .await;
 
         // Poll volume pot (GPIO2)
-        vol_pot.poll_and_send(&sender, &mut adc_bus.adc, &mut vol_pin).await;
+        vol_pot
+            .poll_and_send(sender, &mut adc_bus.adc, &mut vol_pin)
+            .await;
 
         // Wait before next poll cycle
         Timer::after(Duration::from_millis(ADC_POLL_INTERVAL_MS)).await;

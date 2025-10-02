@@ -16,7 +16,7 @@ pub const DEFAULT_VOLUME: f32 = 0.9;
 /// Master output gain applied after voice mixing (0.0 to 1.0)
 /// Provides headroom even when all voices are at max volume
 /// 0.65 ≈ -3.7dB headroom, 0.75 ≈ -2.5dB headroom
-pub const MASTER_GAIN: f32 = 0.75;
+pub const MASTER_GAIN: f32 = 0.85;
 
 /// DMA circular buffer size in bytes
 /// Must be divisible by 4 (stereo i16 frame size)
@@ -61,6 +61,3 @@ pub const FREQUENCY_MIN: f32 = 30.0;
 pub const FREQUENCY_MAX: f32 = 1024.0;
 
 pub const POT_CHANGE_THRESHOLD: f32 = 0.001; // 0.001 -> ~1Hz granularity
-
-/// Button debounce time in milliseconds
-pub const BUTTON_DEBOUNCE_MS: u64 = 10;

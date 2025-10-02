@@ -12,8 +12,8 @@ use embassy_executor::Spawner;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex as ChannelMutex;
 use embassy_sync::channel::Channel;
 use esp_backtrace as _;
-use esp_hal::{dma_circular_buffers, timer::timg::TimerGroup};
-use synth::{config::*, engine::Engine, hardware, message::Message};
+use esp_hal::{dma_circular_buffers, gpio::{Input, InputConfig, Pull}, timer::timg::TimerGroup};
+use synth::{config::*, controls::button_task, engine::Engine, hardware, message::Message};
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
@@ -34,10 +34,23 @@ async fn main(spawner: Spawner) {
     let receiver = CHANNEL.receiver();
     let sender = CHANNEL.sender();
 
+      // Setup 3 buttons (GPIO3, GPIO4, GPIO5)
+    let config = InputConfig::default().with_pull(Pull::Up);
+    let btn0 = Input::new(peripherals.GPIO3, config);
+    // let btn1 = Input::new(peripherals.GPIO4, Pull::Up);
+    // let btn2 = Input::new(peripherals.GPIO5, Pull::Up);
+
+    // Spawn same task 3 times with different parameters!
+    spawner.spawn(button_task(sender, btn0, 0)).unwrap();
+    // spawner.spawn(button_task(sender.clone(), btn1, 1)).unwrap();
+    // spawner.spawn(button_task(sender.clone(), btn2, 2)).unwrap();
+
+
     // Create synth engine with receiver
     sender.send(Message::ToggleVoice(0)).await;
     sender.send(Message::SelectVoice(0)).await;
     sender.send(Message::SetVolume(1.0)).await;
+
     let mut engine = Engine::new(SAMPLE_RATE as f32, receiver);
 
     // Initialize I2S audio hardware

@@ -49,8 +49,21 @@ impl Engine {
     /// * `msg` - Message from control task (buttons, pots, encoders)
     pub fn process_message(&mut self, msg: Message) {
         match msg {
-            Message::SelectVoice(idx) => {
-                self.selected_voice = Some(idx);
+            Message::SelectVoice(id) => {
+                match self.selected_voice {
+                    // a voice is already selected
+                    Some(selected) => {
+                        if let Some(voice) = self.voices.get_mut(id as usize) {
+                            // it's this voice - deselect this
+                            // if voice.
+    
+                            // it's another voice - deselect other, select this
+                        }
+                        
+                    },
+                    // if no voice is selected - select it
+                    None => self.selected_voice = Some(id)
+                }
             }
 
             Message::ToggleVoice(idx) => {

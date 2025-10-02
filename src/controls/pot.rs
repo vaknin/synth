@@ -7,6 +7,7 @@ use crate::message::Message;
 use esp_hal::analog::adc::{Adc, AdcChannel};
 use esp_hal::peripherals::ADC1;
 use esp_hal::Blocking;
+use log::warn;
 
 /// Potentiometer with filtering, deadband, and parameter mapping.
 ///
@@ -20,8 +21,6 @@ pub struct Potentiometer {
     alpha: f32,
     /// Last sent normalized value (for deadband detection)
     last_sent: f32,
-    /// Deadband threshold (only send if change >= this)
-    threshold: f32,
     /// Mapping function from normalized value to Message
     map_fn: fn(f32) -> Message,
     /// Sample buffer for multisampling (reused each poll)
@@ -33,13 +32,11 @@ impl Potentiometer {
     ///
     /// # Arguments
     /// * `map_fn` - Function to map normalized value (0.0-1.0) to Message
-    /// * `threshold` - Deadband threshold (0.0 = always send, typical: POT_CHANGE_THRESHOLD)
-    pub fn new(map_fn: fn(f32) -> Message, threshold: f32) -> Self {
+    pub fn new(map_fn: fn(f32) -> Message) -> Self {
         Self {
             filtered: ((POT_MIN + POT_MAX) / 2) as f32,
             alpha: ADC_EMA_ALPHA,
             last_sent: 0.0,
-            threshold,
             map_fn,
             samples: [0u16; ADC_MULTISAMPLING_COUNT],
         }
@@ -61,11 +58,10 @@ impl Potentiometer {
     /// * `pin` - Potentiometer GPIO pin (borrowed from control task)
     pub async fn poll_and_send<P>(
         &mut self,
-        sender: &CtrlSender,
+        sender: CtrlSender,
         adc: &mut Adc<'static, ADC1<'static>, Blocking>,
         pin: &mut PotPin<P>,
-    )
-    where
+    ) where
         P: AdcChannel,
     {
         // 1. Multisample: read N samples into internal buffer
@@ -86,9 +82,12 @@ impl Potentiometer {
             .clamp(0.0, 1.0);
 
         // 5. Deadband check: only send if changed significantly
-        if (normalized - self.last_sent).abs() >= self.threshold {
+        if (normalized - self.last_sent).abs() >= POT_CHANGE_THRESHOLD {
             self.last_sent = normalized;
-            sender.send((self.map_fn)(normalized)).await;
+            let msg = (self.map_fn)(normalized);
+            if let Err(e) = sender.try_send(msg) {
+                warn!("Pot message dropped (queue full): {:?}", e);
+            }
         }
     }
 }

@@ -1,0 +1,1 @@
+- logarithmic pots? encoders?
