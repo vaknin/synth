@@ -120,19 +120,36 @@ pub async fn control_task(
             info!("new freq: {freq}");
             producer.enqueue(Message::SetFrequency(freq)).ok();
         }
-        // else {
-        //     info!("not enough, diff: {}", (freq_current_value - freq_pot.last_value).abs());
-        // }
 
         // Read volume pot (GPIO2) with multisampling
-        // for sample in vol_samples.iter_mut() {
-        //     *sample = adc_ctrl.adc.read_blocking(&mut adc_ctrl.vol_pin);
-        // }
-        // let vol_norm = vol_pot.read(&vol_samples);
-        // let vol = pot_to_volume(vol_norm);
-        // producer.enqueue(Message::SetVolume(vol)).ok();
+        for sample in vol_samples.iter_mut() {
+            *sample = adc_ctrl.adc.read_blocking(&mut adc_ctrl.vol_pin);
+        }
+        let vol_norm = vol_pot.read(&vol_samples);
+        let vol = pot_to_volume(vol_norm);
+        producer.enqueue(Message::SetVolume(vol)).ok();
 
         Timer::after(Duration::from_millis(ADC_POLL_INTERVAL_MS)).await;
+    }
+}
+
+/// Generic poller for *one* pot:
+/// - multisamples
+/// - deadband threshold
+/// - maps normalized value to a Message
+pub async fn poll_and_send<const NS: usize, P>(
+    tx: &mut CtrlSender,
+    adc: &mut Adc<'static, ADC1<'static>, Blocking>,
+    pin: &mut PotPin<P>,
+    last_norm: &mut f32,
+    threshold: f32,
+    mut samp: [u16; NS],
+    map: fn(f32) -> Message,
+) {
+    let norm = read_norm(adc, pin, &mut samp);
+    if (norm - *last_norm).abs() >= threshold {
+        *last_norm = norm;
+        let _ = tx.send(map(norm)).await;
     }
 }
 

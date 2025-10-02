@@ -9,6 +9,10 @@
 #![no_main]
 
 use embassy_executor::Spawner;
+use embassy_sync::channel::Channel;
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex as ChannelMutex;
+
+
 // use embassy_time::{Duration, Timer};
 use esp_backtrace as _;
 use esp_hal::{
@@ -16,48 +20,33 @@ use esp_hal::{
     gpio::{Input, Output, Pull},
     timer::timg::TimerGroup,
 };
-use heapless::spsc::Queue;
+// use heapless::spsc::Queue;
 use synth::{config::*, engine::Engine, hardware, message::Message};
 
 esp_bootloader_esp_idf::esp_app_desc!();
+
+pub type CtrlSender   = Sender<'static, ChannelMutex, Message, MESSAGE_QUEUE_SIZE>;
+pub type CtrlReceiver = Receiver<'static, ChannelMutex, Message, MESSAGE_QUEUE_SIZE>;
+
+static CHANNEL: Channel<ChannelMutex, Message, MESSAGE_QUEUE_SIZE> = Channel::new();
 
 #[esp_hal_embassy::main]
 async fn main(spawner: Spawner) {
     // Initialize logger
     esp_println::logger::init_logger_from_env();
-
+    
     let peripherals = esp_hal::init(esp_hal::Config::default());
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     esp_hal_embassy::init(timg0.timer0);
     let dma_channel = peripherals.DMA_CH0;
-
-    // Create SPSC queue for control → audio messages
-    static MESSAGE_QUEUE: static_cell::StaticCell<Queue<Message, MESSAGE_QUEUE_SIZE>> = static_cell::StaticCell::new();
-    let queue = MESSAGE_QUEUE.init(Queue::new());
-    let (mut producer, mut consumer) = queue.split();
+    
+    // Create MPSC Channel
+    let consumer = CHANNEL.receiver();
+    let freq_producer = CHANNEL.sender();
+    let vol_producer = CHANNEL.sender();
 
     // Create synth engine
     let mut engine = Engine::new(SAMPLE_RATE as f32);
-
-    // Setup button and LED for voice 0
-    // let button0 = Input::new(peripherals.GPIO10, Pull::Up);
-    // let led0 = Output::new(peripherals.GPIO11, esp_hal::gpio::Level::Low);
-
-    // Debug: initialize voice 0 for testing
-    producer.enqueue(Message::ToggleVoice(0)).ok();
-    producer.enqueue(Message::SelectVoice(0)).ok();
-    producer.enqueue(Message::SetVolume(1.0)).ok();
-    producer.enqueue(Message::SetFrequency(35.0)).ok();
-
-    // producer.enqueue(Message::SelectVoice(1)).ok();
-    // producer.enqueue(Message::ToggleVoice(1)).ok();
-    // producer.enqueue(Message::SetFrequency(180.0)).ok();
-    // producer.enqueue(Message::SetVolume(0.35)).ok();
-
-    // producer.enqueue(Message::SelectVoice(2)).ok();
-    // producer.enqueue(Message::ToggleVoice(2)).ok();
-    // producer.enqueue(Message::SetFrequency(440.0)).ok();
-    // producer.enqueue(Message::SetVolume(0.15)).ok();
 
     // Initialize I2S audio hardware
     #[allow(clippy::manual_div_ceil)]

@@ -1,12 +1,17 @@
 //! Hardware initialization and configuration.
 
 use esp_hal::{
-    analog::adc::{Adc, AdcCalCurve, AdcConfig, Attenuation},
-    dma::DmaDescriptor,
-    i2s::master::{asynch::I2sWriteDmaTransferAsync, DataFormat, I2s, Standard},
-    time::Rate,
+    analog::adc::{Adc, AdcCalCurve, AdcConfig, AdcPin, Attenuation}, dma::DmaDescriptor, i2s::master::{asynch::I2sWriteDmaTransferAsync, DataFormat, I2s, Standard}, peripherals::ADC1, time::Rate, Blocking
 };
 use crate::config::SAMPLE_RATE;
+
+/// Slim controller: own only the ADC peripheral.
+pub struct AdcBus {
+    pub adc: Adc<'static, ADC1<'static>, Blocking>,
+}
+
+/// Type aliases to make signatures readable.
+pub type PotPin<P> = AdcPin<P, ADC1<'static>, AdcCalCurve<ADC1<'static>>>;
 
 /// Initialize I2S audio output and return ready-to-use DMA transaction.
 ///
@@ -55,51 +60,19 @@ pub fn setup_audio(
     i2s_tx.write_dma_circular_async(tx_buffer).unwrap()
 }
 
-/// ADC controller for potentiometer inputs.
-pub struct AdcController {
-    pub adc: Adc<'static, esp_hal::peripherals::ADC1<'static>, esp_hal::Blocking>,
-    pub freq_pin: esp_hal::analog::adc::AdcPin<
-        esp_hal::peripherals::GPIO1<'static>,
-        esp_hal::peripherals::ADC1<'static>,
-        AdcCalCurve<esp_hal::peripherals::ADC1<'static>>,
-    >,
-    pub vol_pin: esp_hal::analog::adc::AdcPin<
-        esp_hal::peripherals::GPIO2<'static>,
-        esp_hal::peripherals::ADC1<'static>,
-        AdcCalCurve<esp_hal::peripherals::ADC1<'static>>,
-    >,
-}
+/// Generic setup: you pass *any* two GPIOs that are ADC1-capable.
+/// We return the ADC bus + two configured pins (with calibration).
+pub fn setup_adc<PF, PV>(
+    adc1: ADC1<'static>,
+    gpio_freq: PF,
+    gpio_vol: PV,
+) -> (AdcBus, PotPin<PF>, PotPin<PV>) {
+    let mut cfg = AdcConfig::new();
 
-/// Initialize ADC for reading potentiometers.
-///
-/// Configures ADC1 with 11dB attenuation for full 0-3.3V range.
-/// Sets up two analog pins for frequency and volume control.
-///
-/// # Pin Configuration
-/// - GPIO1 → ADC1_CH0 (frequency potentiometer)
-/// - GPIO2 → ADC1_CH1 (volume potentiometer)
-///
-/// # Arguments
-/// * `adc1` - ADC1 peripheral
-/// * `gpio1` - Frequency pot pin
-/// * `gpio2` - Volume pot pin
-///
-/// # Returns
-/// AdcController with configured ADC and pins
-pub fn setup_adc(
-    adc1: esp_hal::peripherals::ADC1<'static>,
-    gpio1: esp_hal::peripherals::GPIO1<'static>,
-    gpio2: esp_hal::peripherals::GPIO2<'static>,
-) -> AdcController {
-    let mut adc_config = AdcConfig::new();
+    // 11 dB → full 0–3.3V, with curve calibration
+    let freq_pin = cfg.enable_pin_with_cal::<_, AdcCalCurve<_>>(gpio_freq, Attenuation::_11dB);
+    let vol_pin  = cfg.enable_pin_with_cal::<_, AdcCalCurve<_>>(gpio_vol,  Attenuation::_11dB);
 
-    // Configure pins with 11dB attenuation AND curve calibration
-    // AdcCalCurve uses polynomial error correction for better accuracy
-    // Using patched version with Horner's method to fix overflow bug
-    let freq_pin = adc_config.enable_pin_with_cal::<_, AdcCalCurve<_>>(gpio1, Attenuation::_11dB);
-    let vol_pin = adc_config.enable_pin_with_cal::<_, AdcCalCurve<_>>(gpio2, Attenuation::_11dB);
-
-    let adc = Adc::new(adc1, adc_config);
-
-    AdcController { adc, freq_pin, vol_pin }
+    let adc = Adc::new(adc1, cfg);
+    (AdcBus { adc }, freq_pin, vol_pin)
 }
