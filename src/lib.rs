@@ -1,7 +1,7 @@
 #![no_std]
 
-pub mod audio_util;
 pub mod config;
+pub mod controls;
 pub mod engine;
 pub mod hardware;
 pub mod message;

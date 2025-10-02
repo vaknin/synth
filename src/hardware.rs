@@ -1,6 +1,7 @@
 //! Hardware initialization and configuration.
 
 use esp_hal::{
+    analog::adc::{Adc, AdcCalCurve, AdcConfig, Attenuation},
     dma::DmaDescriptor,
     i2s::master::{asynch::I2sWriteDmaTransferAsync, DataFormat, I2s, Standard},
     time::Rate,
@@ -52,4 +53,53 @@ pub fn setup_audio(
     .build(tx_descriptors);
 
     i2s_tx.write_dma_circular_async(tx_buffer).unwrap()
+}
+
+/// ADC controller for potentiometer inputs.
+pub struct AdcController {
+    pub adc: Adc<'static, esp_hal::peripherals::ADC1<'static>, esp_hal::Blocking>,
+    pub freq_pin: esp_hal::analog::adc::AdcPin<
+        esp_hal::peripherals::GPIO1<'static>,
+        esp_hal::peripherals::ADC1<'static>,
+        AdcCalCurve<esp_hal::peripherals::ADC1<'static>>,
+    >,
+    pub vol_pin: esp_hal::analog::adc::AdcPin<
+        esp_hal::peripherals::GPIO2<'static>,
+        esp_hal::peripherals::ADC1<'static>,
+        AdcCalCurve<esp_hal::peripherals::ADC1<'static>>,
+    >,
+}
+
+/// Initialize ADC for reading potentiometers.
+///
+/// Configures ADC1 with 11dB attenuation for full 0-3.3V range.
+/// Sets up two analog pins for frequency and volume control.
+///
+/// # Pin Configuration
+/// - GPIO1 → ADC1_CH0 (frequency potentiometer)
+/// - GPIO2 → ADC1_CH1 (volume potentiometer)
+///
+/// # Arguments
+/// * `adc1` - ADC1 peripheral
+/// * `gpio1` - Frequency pot pin
+/// * `gpio2` - Volume pot pin
+///
+/// # Returns
+/// AdcController with configured ADC and pins
+pub fn setup_adc(
+    adc1: esp_hal::peripherals::ADC1<'static>,
+    gpio1: esp_hal::peripherals::GPIO1<'static>,
+    gpio2: esp_hal::peripherals::GPIO2<'static>,
+) -> AdcController {
+    let mut adc_config = AdcConfig::new();
+
+    // Configure pins with 11dB attenuation AND curve calibration
+    // AdcCalCurve uses polynomial error correction for better accuracy
+    // Using patched version with Horner's method to fix overflow bug
+    let freq_pin = adc_config.enable_pin_with_cal::<_, AdcCalCurve<_>>(gpio1, Attenuation::_11dB);
+    let vol_pin = adc_config.enable_pin_with_cal::<_, AdcCalCurve<_>>(gpio2, Attenuation::_11dB);
+
+    let adc = Adc::new(adc1, adc_config);
+
+    AdcController { adc, freq_pin, vol_pin }
 }

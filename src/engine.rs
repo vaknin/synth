@@ -1,6 +1,5 @@
 //! Engine module: manages voices, processes messages, renders audio.
 
-use crate::audio_util::f32_to_i16_le;
 use crate::config::{VOICE_COUNT, STARTING_FREQUENCY, MASTER_GAIN};
 use crate::message::Message;
 use crate::voice::Voice;
@@ -101,7 +100,8 @@ impl Engine {
 
         // Generate audio for each stereo frame
         for chunk in buffer.chunks_exact_mut(4) {
-            let bytes = f32_to_i16_le(self.tick());
+            let sample_i16 = (self.tick() * (i16::MAX as f32)) as i16;
+            let bytes = sample_i16.to_le_bytes();
             chunk.copy_from_slice(&[bytes[0], bytes[1], bytes[0], bytes[1]]);
         }
 

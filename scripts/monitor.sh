@@ -1,0 +1,1 @@
+espflash monitor --non-interactive

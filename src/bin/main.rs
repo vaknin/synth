@@ -9,15 +9,20 @@
 #![no_main]
 
 use embassy_executor::Spawner;
+// use embassy_time::{Duration, Timer};
 use esp_backtrace as _;
-use esp_hal::{dma_circular_buffers, timer::timg::TimerGroup};
+use esp_hal::{
+    dma_circular_buffers,
+    gpio::{Input, Output, Pull},
+    timer::timg::TimerGroup,
+};
 use heapless::spsc::Queue;
 use synth::{config::*, engine::Engine, hardware, message::Message};
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
 #[esp_hal_embassy::main]
-async fn main(_spawner: Spawner) {
+async fn main(spawner: Spawner) {
     // Initialize logger
     esp_println::logger::init_logger_from_env();
 
@@ -29,23 +34,30 @@ async fn main(_spawner: Spawner) {
     // Create SPSC queue for control → audio messages
     static MESSAGE_QUEUE: static_cell::StaticCell<Queue<Message, MESSAGE_QUEUE_SIZE>> = static_cell::StaticCell::new();
     let queue = MESSAGE_QUEUE.init(Queue::new());
-    let (mut producer, mut consumer) = queue.split();
+    let (producer, mut consumer) = queue.split();
 
     // Create synth engine
     let mut engine = Engine::new(SAMPLE_RATE as f32);
-    producer.enqueue(Message::SelectVoice(0)).ok();
+
+    // Setup button and LED for voice 0
+    let button0 = Input::new(peripherals.GPIO10, Pull::Up);
+    let led0 = Output::new(peripherals.GPIO11, esp_hal::gpio::Level::Low);
+
+    // Debug: initialize voice 0 for testing
     producer.enqueue(Message::ToggleVoice(0)).ok();
+    producer.enqueue(Message::SelectVoice(0)).ok();
     producer.enqueue(Message::SetVolume(1.0)).ok();
+    producer.enqueue(Message::SetFrequency(35.0)).ok();
 
-    producer.enqueue(Message::SelectVoice(1)).ok();
-    producer.enqueue(Message::ToggleVoice(1)).ok();
-    producer.enqueue(Message::SetFrequency(180.0)).ok();
-    producer.enqueue(Message::SetVolume(0.35)).ok();
+    // producer.enqueue(Message::SelectVoice(1)).ok();
+    // producer.enqueue(Message::ToggleVoice(1)).ok();
+    // producer.enqueue(Message::SetFrequency(180.0)).ok();
+    // producer.enqueue(Message::SetVolume(0.35)).ok();
 
-    producer.enqueue(Message::SelectVoice(2)).ok();
-    producer.enqueue(Message::ToggleVoice(2)).ok();
-    producer.enqueue(Message::SetFrequency(440.0)).ok();
-    producer.enqueue(Message::SetVolume(0.15)).ok();
+    // producer.enqueue(Message::SelectVoice(2)).ok();
+    // producer.enqueue(Message::ToggleVoice(2)).ok();
+    // producer.enqueue(Message::SetFrequency(440.0)).ok();
+    // producer.enqueue(Message::SetVolume(0.15)).ok();
 
     // Initialize I2S audio hardware
     #[allow(clippy::manual_div_ceil)]
@@ -60,8 +72,11 @@ async fn main(_spawner: Spawner) {
         tx_descriptors,
     );
 
-    // TODO: Add ADC setup for pots (frequency + volume control)
-    // TODO: Add GPIO button handling for voice selection/toggle
+    // Initialize ADC for potentiometers (freq on GPIO1, vol on GPIO2)
+    let adc_ctrl = hardware::setup_adc(peripherals.ADC1, peripherals.GPIO1, peripherals.GPIO2);
+
+    // Spawn control task to read both potentiometers
+    spawner.spawn(synth::controls::control_task(producer, adc_ctrl)).unwrap();
 
     // Audio rendering loop
     loop {
@@ -71,3 +86,4 @@ async fn main(_spawner: Spawner) {
             .ok();
     }
 }
+
