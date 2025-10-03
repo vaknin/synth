@@ -33,7 +33,7 @@ pub const MAX_DB: f32 = 0.0;
 
 /// Master output gain applied after voice mixing (0.0 to 1.0).
 /// Provides headroom even when all voices are at max volume (0.95 ≈ -0.45 dB).
-pub const MASTER_GAIN: f32 = 0.95;
+pub const MASTER_GAIN: f32 = 0.85;
 
 // === Wavetable ===
 
@@ -84,7 +84,7 @@ pub const POT_MAX: u16 = 3156;
 pub const POT_CHANGE_THRESHOLD: f32 = 0.001;
 
 /// Exponent used when shaping the potentiometer response curve.
-pub const POT_EXPONENT_SCALE: i32 = 4;
+pub const POT_EXPONENT_SCALE: i32 = 2;
 
 /// Minimum frequency target for potentiometer control (Hz).
 pub const FREQUENCY_MIN: f32 = 30.0;
