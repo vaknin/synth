@@ -1,6 +1,6 @@
 # ESP32-S3 Drone Synth
 
-![Synth Hardware](image.png)
+<img src="image.png" alt="Synth Hardware" width="400">
 
 **Handheld West Coast-inspired experimental drone synthesizer** for sound exploration. Battery-powered, portable, with OLED visualization and soft-neon aesthetics.
 
