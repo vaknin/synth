@@ -8,6 +8,7 @@ use esp_hal::analog::adc::{Adc, AdcChannel};
 use esp_hal::peripherals::ADC1;
 use esp_hal::Blocking;
 use log::warn;
+use micromath::F32Ext;
 
 /// Potentiometer with filtering, deadband, and parameter mapping.
 ///
@@ -76,10 +77,8 @@ impl Potentiometer {
         // 3. Apply EMA filter: filtered = alpha * filtered + (1-alpha) * new
         self.filtered = self.filtered * self.alpha + avg * (1.0 - self.alpha);
 
-        // 4. Normalize to 0.0-1.0 range using calibrated min/max
-        let normalized = ((self.filtered as u16).saturating_sub(POT_MIN) as f32
-            / (POT_MAX - POT_MIN) as f32)
-            .clamp(0.0, 1.0);
+        // 4. Normalize to 0.0-1.0 range using calibrated min/max, defensive clamping
+        let normalized = (self.filtered / (POT_MAX as f32)).clamp(0.0, 1.0);
 
         // 5. Deadband check: only send if changed significantly
         if (normalized - self.last_sent).abs() >= POT_CHANGE_THRESHOLD {
@@ -92,18 +91,25 @@ impl Potentiometer {
     }
 }
 
-/// Map normalized potentiometer value to frequency (Hz).
-///
-/// Uses linear mapping from FREQUENCY_MIN to FREQUENCY_MAX.
-/// (Exponential mapping would require libm in no_std)
+fn apply_logarithmic_curve(val: f32) -> f32 {
+    val.powi(POT_EXPONENT_SCALE)
+}
+
+/// Map normalized potentiometer value to frequency (Hz), logarithmically
 pub fn map_freq(normalized: f32) -> Message {
-    let freq = FREQUENCY_MIN + normalized * (FREQUENCY_MAX - FREQUENCY_MIN);
+    let curved = apply_logarithmic_curve(normalized);
+    let freq = FREQUENCY_MIN + (FREQUENCY_MAX - FREQUENCY_MIN) * curved;
     Message::SetFrequency(freq)
 }
 
-/// Map normalized potentiometer value to volume (0.0-1.0).
-///
-/// Direct linear mapping: pot position = volume level.
+/// Map normalized potentiometer value to volume using dB calculation
 pub fn map_vol(normalized: f32) -> Message {
-    Message::SetVolume(normalized.clamp(0.0, 1.0))
+    #[allow(non_snake_case)]
+    let dB = MIN_DB + normalized * (MAX_DB - MIN_DB);
+    let volume = (10f32).powf(dB/20.0);
+    debug_assert!((0.0..=1.0).contains(&volume),
+        "volume out of bounds: {} (dB: {}, normalized: {})",
+        volume, dB, normalized
+    );
+    Message::SetVolume(volume)
 }

@@ -1,5 +1,7 @@
 //! Engine module: manages voices, processes messages, renders audio.
 
+use core::array::from_fn;
+
 use crate::config::{MESSAGE_QUEUE_SIZE, VOICE_COUNT, STARTING_FREQUENCY, MASTER_GAIN};
 use crate::message::Message;
 use crate::voice::Voice;
@@ -20,6 +22,12 @@ pub struct Engine {
 
     /// Message receiver from control tasks
     receiver: Receiver<'static, CriticalSectionRawMutex, Message, MESSAGE_QUEUE_SIZE>,
+
+    /// Number of currently active voices
+    active_count: u32,
+
+    /// Cached reciprocal of active voice count (for fast normalization)
+    active_count_reciprocal: f32,
 }
 
 impl Engine {
@@ -36,10 +44,12 @@ impl Engine {
         receiver: Receiver<'static, CriticalSectionRawMutex, Message, MESSAGE_QUEUE_SIZE>,
     ) -> Self {
         Self {
-            voices: core::array::from_fn(|_| Voice::new(STARTING_FREQUENCY, sample_rate)),
+            voices: from_fn(|_| Voice::new(STARTING_FREQUENCY, sample_rate)),
             selected_voice: None,
             sample_rate,
             receiver,
+            active_count: 0,
+            active_count_reciprocal: 1.0,
         }
     }
 
@@ -55,8 +65,7 @@ impl Engine {
                     Some(selected) => {
                         if let Some(voice) = self.voices.get_mut(id as usize) {
                             // it's this voice - deselect this
-                            // if voice.
-    
+                            
                             // it's another voice - deselect other, select this
                         }
                         
@@ -68,7 +77,22 @@ impl Engine {
 
             Message::ToggleVoice(idx) => {
                 if let Some(voice) = self.voices.get_mut(idx as usize) {
-                    voice.set_active(!voice.active);
+                    let was_active = voice.active;
+                    voice.set_active(!was_active);
+
+                    // Update active count and cache reciprocal
+                    if was_active {
+                        self.active_count = self.active_count.saturating_sub(1);
+                    } else {
+                        self.active_count += 1;
+                    }
+
+                    // Cache reciprocal for fast multiplication (avoid division in tick)
+                    self.active_count_reciprocal = if self.active_count > 0 {
+                        1.0 / self.active_count as f32
+                    } else {
+                        1.0 // Doesn't matter, sum will be 0.0
+                    };
                 }
             }
 
@@ -93,10 +117,12 @@ impl Engine {
     /// Generate next mixed audio sample from all voices.
     ///
     /// # Returns
-    /// Sum of all active voices with master gain applied
+    /// Sum of all active voices, normalized by active count, with master gain applied
     pub fn tick(&mut self) -> f32 {
         let sum: f32 = self.voices.iter_mut().map(|v| v.tick()).sum();
-        (sum / VOICE_COUNT as f32) * MASTER_GAIN
+
+        // active_count_reciprocal is pre-computed when voices toggle
+        sum * self.active_count_reciprocal * MASTER_GAIN
     }
 
     /// Render audio into provided buffer.
@@ -115,15 +141,23 @@ impl Engine {
         }
 
         // Process all pending control messages (non-blocking)
+        // if clicks or issues, check this section because of 'while' drains everything
         while let Ok(msg) = self.receiver.try_receive() {
             self.process_message(msg);
         }
 
+        // Cache constant outside loop (computed once instead of per-sample)
+        const I16_MAX_F32: f32 = i16::MAX as f32;
+
         // Generate audio for each stereo frame
         for chunk in buffer.chunks_exact_mut(4) {
-            let sample_i16 = (self.tick() * (i16::MAX as f32)) as i16;
+            let sample_i16 = (self.tick() * I16_MAX_F32) as i16;
             let bytes = sample_i16.to_le_bytes();
-            chunk.copy_from_slice(&[bytes[0], bytes[1], bytes[0], bytes[1]]);
+            // Direct assignment is faster than copy_from_slice for 4 bytes
+            chunk[0] = bytes[0];
+            chunk[1] = bytes[1];
+            chunk[2] = bytes[0];
+            chunk[3] = bytes[1];
         }
 
         buffer.len() - (buffer.len() % 4)

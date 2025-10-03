@@ -1,5 +1,7 @@
 #![allow(dead_code)]
 
+use crate::config::{WAVETABLE_MASK, WAVETABLE_SIZE_F32};
+
 /// High-quality 1024-sample sine wave lookup table.
 /// Values are normalized to the range -1.0 to 1.0 for clean DSP processing.
 #[allow(clippy::approx_constant)]
@@ -138,15 +140,16 @@ pub const SINE: [f32; 1024] = [
 ///
 /// Outputs normalized f32 samples in the range -1.0 to 1.0.
 pub struct Oscillator {
-    /// Current position in the waveform (0.0 to 1.0)
+    /// Current position in wavetable index space (0.0 to WAVETABLE_SIZE)
+    /// Stored as index to eliminate multiply in tick()
     phase: f32,
-    /// How much to advance phase per sample (determines frequency)
+    /// Phase advance per sample in wavetable index space (determines frequency)
+    /// Scaled to wavetable size to match phase units
     phase_increment: f32,
     /// Sample rate in Hz (constant for the lifetime of the oscillator)
     sample_rate: f32,
     /// Reference to the wavetable (normalized f32 values)
     wavetable: &'static [f32],
-    frequency: f32
 }
 
 impl Oscillator {
@@ -156,13 +159,14 @@ impl Oscillator {
     /// * `frequency` - Frequency in Hz (e.g., 440.0 for A4)
     /// * `sample_rate` - Sample rate in Hz (e.g., 44100.0)
     pub fn new(frequency: f32, sample_rate: f32) -> Self {
-        let phase_increment = frequency / sample_rate;
+        // Scale phase_increment to wavetable index space
+        // This eliminates one multiply per tick()
+        let phase_increment = (frequency / sample_rate) * WAVETABLE_SIZE_F32;
         Self {
             phase: 0.0,
             phase_increment,
             sample_rate,
             wavetable: &SINE,
-            frequency
         }
     }
 
@@ -171,30 +175,31 @@ impl Oscillator {
     /// # Arguments
     /// * `frequency` - New frequency in Hz
     pub fn set_frequency(&mut self, frequency: f32) {
-        self.phase_increment = frequency / self.sample_rate;
-        self.frequency = frequency;
+        // Scale to wavetable index space (matches phase units)
+        self.phase_increment = (frequency / self.sample_rate) * WAVETABLE_SIZE_F32;
     }
 
     /// Generate the next sample.
     ///
     /// Returns a normalized f32 value in the range -1.0 to 1.0.
     pub fn tick(&mut self) -> f32 {
-        // Advance phase first
+        // Advance phase (already in wavetable index space)
         self.phase += self.phase_increment;
 
-        // Wrap phase to [0.0, 1.0) range
-        if self.phase >= 1.0 {
-            self.phase -= 1.0;
+        // Wrap phase to [0.0, WAVETABLE_SIZE) range
+        if self.phase >= WAVETABLE_SIZE_F32 {
+            self.phase -= WAVETABLE_SIZE_F32;
         }
 
-        // Linear interpolation between adjacent wavetable samples
-        let position = self.phase * self.wavetable.len() as f32;
-        let index = position as usize;
-        let frac = position - index as f32;
+        // Phase is already the position - no multiply needed!
+        let index = self.phase as usize;
+        let frac = self.phase - index as f32;
 
+        // Use bitwise AND for wrapping (faster than modulo for power-of-2 sizes)
         let sample1 = self.wavetable[index];
-        let sample2 = self.wavetable[(index + 1) % self.wavetable.len()];
+        let sample2 = self.wavetable[(index + 1) & WAVETABLE_MASK];
 
+        // FMA (fused multiply-add) - single instruction on XTensa LX7
         sample1 + (sample2 - sample1) * frac
     }
 }

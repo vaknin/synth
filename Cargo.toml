@@ -34,6 +34,7 @@ esp-hal-embassy = { version = "0.9.0", features = ["esp32s3", "log-04"] }
 esp-println = { version = "0.15.0", features = ["esp32s3", "log-04"] }
 static_cell = "2.1.1"
 heapless = "0.9.1"
+micromath = { version = "2.1.0", default-features = false }
 
 
 [profile.dev]

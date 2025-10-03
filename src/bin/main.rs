@@ -35,16 +35,15 @@ async fn main(spawner: Spawner) {
     let sender = CHANNEL.sender();
 
       // Setup 3 buttons (GPIO3, GPIO4, GPIO5)
-    let config = InputConfig::default().with_pull(Pull::Up);
-    let btn0 = Input::new(peripherals.GPIO3, config);
+    // let config = InputConfig::default().with_pull(Pull::Up);
+    // let btn0 = Input::new(peripherals.GPIO3, config);
     // let btn1 = Input::new(peripherals.GPIO4, Pull::Up);
     // let btn2 = Input::new(peripherals.GPIO5, Pull::Up);
 
     // Spawn same task 3 times with different parameters!
-    spawner.spawn(button_task(sender, btn0, 0)).unwrap();
+    // spawner.spawn(button_task(sender, btn0, 0)).unwrap();
     // spawner.spawn(button_task(sender.clone(), btn1, 1)).unwrap();
     // spawner.spawn(button_task(sender.clone(), btn2, 2)).unwrap();
-
 
     // Create synth engine with receiver
     sender.send(Message::ToggleVoice(0)).await;
@@ -74,9 +73,7 @@ async fn main(spawner: Spawner) {
     );
 
     // Spawn pot task to read both potentiometers
-    spawner
-        .spawn(synth::controls::pot_task(sender, adc_bus, freq_pin, vol_pin))
-        .unwrap();
+    spawner.spawn(synth::controls::pot_task(sender, adc_bus, freq_pin, vol_pin)).unwrap();
 
     // Audio rendering loop
     loop {
