@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 
 use crate::config::{WAVETABLE_MASK, WAVETABLE_SIZE_F32};
+use crate::smoother::Smoother;
 
 /// High-quality 1024-sample sine wave lookup table.
 /// Values are normalized to the range -1.0 to 1.0 for clean DSP processing.
@@ -143,9 +144,8 @@ pub struct Oscillator {
     /// Current position in wavetable index space (0.0 to WAVETABLE_SIZE)
     /// Stored as index to eliminate multiply in tick()
     phase: f32,
-    /// Phase advance per sample in wavetable index space (determines frequency)
-    /// Scaled to wavetable size to match phase units
-    phase_increment: f32,
+    /// Phase increment smoother (eliminates clicks from frequency changes)
+    phase_increment: Smoother,
     /// Sample rate in Hz (constant for the lifetime of the oscillator)
     sample_rate: f32,
     /// Reference to the wavetable (normalized f32 values)
@@ -161,10 +161,10 @@ impl Oscillator {
     pub fn new(frequency: f32, sample_rate: f32) -> Self {
         // Scale phase_increment to wavetable index space
         // This eliminates one multiply per tick()
-        let phase_increment = (frequency / sample_rate) * WAVETABLE_SIZE_F32;
+        let phase_inc = (frequency / sample_rate) * WAVETABLE_SIZE_F32;
         Self {
             phase: 0.0,
-            phase_increment,
+            phase_increment: Smoother::new(phase_inc),
             sample_rate,
             wavetable: &SINE,
         }
@@ -176,15 +176,19 @@ impl Oscillator {
     /// * `frequency` - New frequency in Hz
     pub fn set_frequency(&mut self, frequency: f32) {
         // Scale to wavetable index space (matches phase units)
-        self.phase_increment = (frequency / self.sample_rate) * WAVETABLE_SIZE_F32;
+        let phase_inc = (frequency / self.sample_rate) * WAVETABLE_SIZE_F32;
+        self.phase_increment.set_target(phase_inc);
     }
 
     /// Generate the next sample.
     ///
     /// Returns a normalized f32 value in the range -1.0 to 1.0.
     pub fn tick(&mut self) -> f32 {
+        // Update phase increment smoother (eliminates clicks from frequency changes)
+        self.phase_increment.tick();
+
         // Advance phase (already in wavetable index space)
-        self.phase += self.phase_increment;
+        self.phase += self.phase_increment.current;
 
         // Wrap phase to [0.0, WAVETABLE_SIZE) range
         if self.phase >= WAVETABLE_SIZE_F32 {

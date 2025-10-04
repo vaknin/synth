@@ -11,14 +11,16 @@ pub const VOICE_COUNT: usize = 3;
 /// 44.1 kHz keeps compatibility with consumer audio equipment.
 pub const SAMPLE_RATE: u32 = 44_100;
 
-/// Parameter smoothing coefficient for volume and other time-varying controls (0.0 to 1.0).
-/// Higher values slow the response and help eliminate zipper noise from abrupt changes.
-pub const VOLUME_SMOOTHING_COEFF: f32 = 0.99;
+/// Universal parameter smoothing coefficient (0.0 to 1.0).
+/// Used for all time-varying parameters (frequency, volume, filters, etc.)
+/// Higher values = more smoothing = slower response. Prevents clicks and zipper noise.
+/// 0.99 provides ~2-5ms transition at 44.1kHz sample rate.
+pub const SMOOTHING_COEFF: f32 = 0.99;
 
 // === Voice Defaults ===
 
 /// Starting frequency for all voices on initialization (Hz).
-pub const STARTING_FREQUENCY: f32 = 77.0;
+pub const DEFAULT_FREQUENCY: f32 = 77.0;
 
 /// Default volume level for voices (0.0 to 1.0).
 pub const DEFAULT_VOICE_VOLUME: f32 = 0.9;

@@ -2,11 +2,10 @@
 
 use core::array::from_fn;
 
-use crate::config::{MESSAGE_QUEUE_SIZE, VOICE_COUNT, STARTING_FREQUENCY, MASTER_GAIN};
+use crate::config::{MASTER_GAIN, SAMPLE_RATE, DEFAULT_FREQUENCY, VOICE_COUNT};
 use crate::message::Message;
 use crate::voice::Voice;
-use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
-use embassy_sync::channel::Receiver;
+use crate::{AudioStream, ChannelReceiver, I16_MAX_F32};
 
 /// Main synth engine managing all voices.
 pub struct Engine {
@@ -16,12 +15,8 @@ pub struct Engine {
     /// Currently selected voice for control (None = no selection)
     selected_voice: Option<u8>,
 
-    /// Audio sample rate (stored for future use in filters/effects)
-    #[allow(dead_code)]
-    sample_rate: f32,
-
     /// Message receiver from control tasks
-    receiver: Receiver<'static, CriticalSectionRawMutex, Message, MESSAGE_QUEUE_SIZE>,
+    consumer: ChannelReceiver,
 
     /// Number of currently active voices
     active_count: u32,
@@ -34,20 +29,17 @@ impl Engine {
     /// Create new engine with initialized voices and message receiver.
     ///
     /// # Arguments
-    /// * `sample_rate` - Audio sample rate in Hz
     /// * `receiver` - Embassy channel receiver for control messages
     ///
     /// # Returns
     /// Engine with VOICE_COUNT voices at STARTING_FREQUENCY, inactive, no selection
     pub fn new(
-        sample_rate: f32,
-        receiver: Receiver<'static, CriticalSectionRawMutex, Message, MESSAGE_QUEUE_SIZE>,
+        receiver: ChannelReceiver,
     ) -> Self {
         Self {
-            voices: from_fn(|_| Voice::new(STARTING_FREQUENCY, sample_rate)),
+            voices: from_fn(|_| Voice::new(DEFAULT_FREQUENCY, SAMPLE_RATE as f32)),
             selected_voice: None,
-            sample_rate,
-            receiver,
+            consumer: receiver,
             active_count: 0,
             active_count_reciprocal: 1.0,
         }
@@ -57,22 +49,26 @@ impl Engine {
     ///
     /// # Arguments
     /// * `msg` - Message from control task (buttons, pots, encoders)
-    pub fn process_message(&mut self, msg: Message) {
+    pub fn consume_messages(&mut self) {
+
+        while let Ok(msg) = self.consumer.try_receive() {
+        
         match msg {
             Message::SelectVoice(id) => {
-                match self.selected_voice {
-                    // a voice is already selected
-                    Some(selected) => {
-                        if let Some(voice) = self.voices.get_mut(id as usize) {
-                            // it's this voice - deselect this
+                self.selected_voice = Some(id)
+                // match self.selected_voice {
+                //     // a voice is already selected
+                //     Some(selected) => {
+                //         if let Some(voice) = self.voices.get_mut(id as usize) {
+                //             // it's this voice - deselect this
                             
-                            // it's another voice - deselect other, select this
-                        }
+                //             // it's another voice - deselect other, select this
+                //         }
                         
-                    },
-                    // if no voice is selected - select it
-                    None => self.selected_voice = Some(id)
-                }
+                //     },
+                //     // if no voice is selected - select it
+                //     None => self.selected_voice = Some(id)
+                // }
             }
 
             Message::ToggleVoice(idx) => {
@@ -112,17 +108,7 @@ impl Engine {
                 }
             }
         }
-    }
-
-    /// Generate next mixed audio sample from all voices.
-    ///
-    /// # Returns
-    /// Sum of all active voices, normalized by active count, with master gain applied
-    pub fn tick(&mut self) -> f32 {
-        let sum: f32 = self.voices.iter_mut().map(|v| v.tick()).sum();
-
-        // active_count_reciprocal is pre-computed when voices toggle
-        sum * self.active_count_reciprocal * MASTER_GAIN
+        }
     }
 
     /// Render audio into provided buffer.
@@ -135,31 +121,32 @@ impl Engine {
     ///
     /// # Returns
     /// Number of bytes written to buffer (will be multiple of 4)
-    pub fn render(&mut self, buffer: &mut [u8]) -> usize {
-        if buffer.len() < 4 {
-            return 0;
-        }
+    pub async fn stream_audio(&mut self, audio_stream:&mut AudioStream) {
 
-        // Process all pending control messages (non-blocking)
-        // if clicks or issues, check this section because of 'while' drains everything
-        while let Ok(msg) = self.receiver.try_receive() {
-            self.process_message(msg);
-        }
+        audio_stream.push_with(|buffer| {
 
-        // Cache constant outside loop (computed once instead of per-sample)
-        const I16_MAX_F32: f32 = i16::MAX as f32;
+            // Process all pending control messages
+            self.consume_messages();
 
-        // Generate audio for each stereo frame
-        for chunk in buffer.chunks_exact_mut(4) {
-            let sample_i16 = (self.tick() * I16_MAX_F32) as i16;
-            let bytes = sample_i16.to_le_bytes();
-            // Direct assignment is faster than copy_from_slice for 4 bytes
-            chunk[0] = bytes[0];
-            chunk[1] = bytes[1];
-            chunk[2] = bytes[0];
-            chunk[3] = bytes[1];
-        }
+            if buffer.len() < 4 {
+                return 0;
+            }
 
-        buffer.len() - (buffer.len() % 4)
+            // Generate audio for each stereo frame
+            for chunk in buffer.chunks_exact_mut(4) {
+
+                let voices_sum: f32 = self.voices.iter_mut().map(|v| v.tick()).sum();
+                let sample = (voices_sum * self.active_count_reciprocal * MASTER_GAIN * I16_MAX_F32) as i16;
+                let bytes = sample.to_le_bytes();
+
+                // Direct assignment is faster than copy_from_slice for 4 bytes
+                chunk[0] = bytes[0];
+                chunk[1] = bytes[1];
+                chunk[2] = bytes[0];
+                chunk[3] = bytes[1];
+            }
+            buffer.len() - (buffer.len() % 4)
+
+        }).await.ok();
     }
 }

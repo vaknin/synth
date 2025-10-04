@@ -4,12 +4,12 @@ use esp_hal::{
     analog::adc::{Adc, AdcCalCurve, AdcChannel, AdcConfig, AdcPin, Attenuation},
     dma::DmaDescriptor,
     gpio::AnalogPin,
-    i2s::master::{asynch::I2sWriteDmaTransferAsync, DataFormat, I2s, Standard},
+    i2s::master::{DataFormat, I2s, Standard},
     peripherals::ADC1,
     time::Rate,
     Blocking,
 };
-use crate::config::SAMPLE_RATE;
+use crate::{config::SAMPLE_RATE, AudioStream};
 
 /// Slim controller: own only the ADC peripheral.
 pub struct AdcBus {
@@ -48,7 +48,7 @@ pub fn setup_audio(
     gpio9: esp_hal::peripherals::GPIO9<'static>,
     tx_buffer: &'static mut [u8],
     tx_descriptors: &'static mut [DmaDescriptor],
-) -> I2sWriteDmaTransferAsync<'static, &'static mut [u8]> {
+) -> AudioStream {
     let i2s_tx = I2s::new(
         i2s0,
         Standard::Philips,
