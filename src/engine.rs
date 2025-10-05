@@ -49,7 +49,7 @@ impl Engine {
     ///
     /// # Arguments
     /// * `msg` - Message from control task (buttons, pots, encoders)
-    pub fn consume_messages(&mut self) {
+    fn consume_messages(&mut self) {
 
         while let Ok(msg) = self.consumer.try_receive() {
         
@@ -111,22 +111,9 @@ impl Engine {
         }
     }
 
-    /// Render audio into provided buffer.
-    ///
-    /// Processes all pending control messages, generates audio samples,
-    /// converts to i16 stereo format, and writes to buffer.
-    ///
-    /// # Arguments
-    /// * `buffer` - Output buffer for i16 LE stereo audio (must be multiple of 4 bytes)
-    ///
-    /// # Returns
-    /// Number of bytes written to buffer (will be multiple of 4)
-    pub async fn stream_audio(&mut self, audio_stream:&mut AudioStream) {
-
+    async fn render(&mut self, audio_stream:&mut AudioStream) {
         audio_stream.push_with(|buffer| {
 
-            // Process all pending control messages
-            self.consume_messages();
 
             if buffer.len() < 4 {
                 return 0;
@@ -148,5 +135,25 @@ impl Engine {
             buffer.len() - (buffer.len() % 4)
 
         }).await.ok();
+    }
+
+    /// Render audio into provided buffer.
+    ///
+    /// Processes all pending control messages, generates audio samples,
+    /// converts to i16 stereo format, and writes to buffer.
+    ///
+    /// # Arguments
+    /// * `buffer` - Output buffer for i16 LE stereo audio (must be multiple of 4 bytes)
+    ///
+    /// # Returns
+    /// Number of bytes written to buffer (will be multiple of 4)
+    /// #[inline] should we inline it? it's the literal hot-path
+    pub async fn stream_audio(&mut self, audio_stream:&mut AudioStream) {
+
+        // Process all pending control messages
+        self.consume_messages();
+
+        self.render(audio_stream).await;
+        
     }
 }

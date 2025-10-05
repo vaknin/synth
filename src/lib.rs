@@ -12,7 +12,7 @@ pub mod engine;
 pub mod hardware;
 pub mod message;
 pub mod oscillator;
-pub mod smoother;
+pub mod slew;
 pub mod voice;
 
 pub type AudioStream = I2sWriteDmaTransferAsync<'static, &'static mut [u8]>;

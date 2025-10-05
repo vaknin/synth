@@ -1,6 +1,6 @@
 //! Voice module: instrument instance with oscillator, volume, and active state.
 
-use crate::{config::DEFAULT_VOICE_VOLUME, oscillator::Oscillator, smoother::Smoother};
+use crate::{config::DEFAULT_VOICE_VOLUME, oscillator::Oscillator, slew::Slew};
 
 /// A single voice in the synth.
 /// Wraps an oscillator with volume control and active state.
@@ -9,7 +9,7 @@ pub struct Voice {
     osc: Oscillator,
 
     /// Volume smoother (eliminates zipper noise from instant volume changes)
-    volume: Smoother,
+    volume: Slew,
 
     /// Whether voice is active (on) or inactive (off)
     /// When inactive, tick() returns 0.0 regardless of volume
@@ -28,7 +28,7 @@ impl Voice {
     pub fn new(frequency: f32, sample_rate: f32) -> Self {
         Self {
             osc: Oscillator::new(frequency, sample_rate),
-            volume: Smoother::new(DEFAULT_VOICE_VOLUME),
+            volume: Slew::new(DEFAULT_VOICE_VOLUME),
             active: false,
         }
     }
@@ -54,11 +54,10 @@ impl Voice {
     ///
     /// # Returns
     /// Audio sample (-1.0 to 1.0) scaled by smoothed volume, or 0.0 if inactive
+    #[inline]
     pub fn tick(&mut self) -> f32 {
         if self.active {
-            // Update volume smoother (eliminates zipper noise)
-            self.volume.tick();
-            self.osc.tick() * self.volume.current
+            self.osc.tick() * self.volume.value()
         } else {
             0.0
         }

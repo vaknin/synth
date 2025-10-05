@@ -10,6 +10,7 @@
 
 - We highly value audio quality, best practices, speed, and efficiency.
 - Always use modern and idiomatic Rust
+- Hot path optimization is critical: use `#[inline]` on small, frequently-called functions (audio callback @ 44.1kHz)
 
 # Guidelines
 - Always build with ./scripts/build.sh

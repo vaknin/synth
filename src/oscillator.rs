@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 use crate::config::{WAVETABLE_MASK, WAVETABLE_SIZE_F32};
-use crate::smoother::Smoother;
+use crate::slew::Slew;
 
 /// High-quality 1024-sample sine wave lookup table.
 /// Values are normalized to the range -1.0 to 1.0 for clean DSP processing.
@@ -145,7 +145,7 @@ pub struct Oscillator {
     /// Stored as index to eliminate multiply in tick()
     phase: f32,
     /// Phase increment smoother (eliminates clicks from frequency changes)
-    phase_increment: Smoother,
+    phase_increment: Slew,
     /// Sample rate in Hz (constant for the lifetime of the oscillator)
     sample_rate: f32,
     /// Reference to the wavetable (normalized f32 values)
@@ -164,7 +164,7 @@ impl Oscillator {
         let phase_inc = (frequency / sample_rate) * WAVETABLE_SIZE_F32;
         Self {
             phase: 0.0,
-            phase_increment: Smoother::new(phase_inc),
+            phase_increment: Slew::new(phase_inc),
             sample_rate,
             wavetable: &SINE,
         }
@@ -183,12 +183,11 @@ impl Oscillator {
     /// Generate the next sample.
     ///
     /// Returns a normalized f32 value in the range -1.0 to 1.0.
+    #[inline]
     pub fn tick(&mut self) -> f32 {
-        // Update phase increment smoother (eliminates clicks from frequency changes)
-        self.phase_increment.tick();
 
-        // Advance phase (already in wavetable index space)
-        self.phase += self.phase_increment.current;
+        // Advance phase
+        self.phase += self.phase_increment.value();
 
         // Wrap phase to [0.0, WAVETABLE_SIZE) range
         if self.phase >= WAVETABLE_SIZE_F32 {

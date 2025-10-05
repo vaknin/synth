@@ -4,7 +4,7 @@
 //! parameter changes. Essential for frequency, volume, filter cutoff, and any
 //! other parameter that changes rapidly during audio rendering.
 
-use crate::config::SMOOTHING_COEFF;
+use crate::config::SMOOTHING_COEFF as SLEW_COEFF;
 
 /// Generic parameter smoother using exponential moving average (EMA).
 ///
@@ -13,25 +13,25 @@ use crate::config::SMOOTHING_COEFF;
 ///
 /// # Example
 /// ```
-/// let mut freq_smoother = Smoother::new(440.0);
-/// freq_smoother.set_target(880.0);
+/// let mut freq_slew = Slew::new(440.0);
+/// freq_slew.set_target(880.0);
 ///
 /// // In audio callback:
-/// freq_smoother.tick();
-/// let smooth_freq = freq_smoother.current;
+/// let smooth_freq = freq_slew.value();  // Advances and returns smoothed value
 /// ```
-pub struct Smoother {
-    /// Current smoothed value (read directly, update via tick())
-    pub current: f32,
+pub struct Slew {
+    /// Current smoothed value (private - access via value())
+    current: f32,
     /// Target value to reach
     target: f32,
+    /// Smoothing coefficient
     coeff: f32
 }
 
-impl Smoother {
-    /// Create a new smoother with initial value.
+impl Slew {
+    /// Create a new slew limiter with initial value.
     ///
-    /// Uses global PARAM_SMOOTHING_COEFF for smoothing behavior.
+    /// Uses global SLEW_COEFF for smoothing behavior.
     ///
     /// # Arguments
     /// * `initial_value` - Starting value (also used as initial target)
@@ -39,22 +39,32 @@ impl Smoother {
         Self {
             current: initial_value,
             target: initial_value,
-            coeff: SMOOTHING_COEFF
+            coeff: SLEW_COEFF
         }
     }
 
     /// Set new target value to smoothly transition to.
     ///
-    /// The smoother will exponentially approach this value over subsequent tick() calls.
+    /// The slew limiter will exponentially approach this value over subsequent value() calls.
     pub fn set_target(&mut self, target: f32) {
         self.target = target;
     }
 
-    /// Generate next smoothed value.
+    /// Get next smoothed value.
     ///
-    /// Call once per audio sample to update the smoothed parameter value.
+    /// Advances the internal state and returns the current smoothed value.
+    /// Call once per audio sample when you need the parameter value.
     #[inline]
-    pub fn tick(&mut self) {
+    pub fn value(&mut self) -> f32 {
+        self.tick();
+        self.current
+    }
+
+    /// Internal tick function - advances the slew limiter state.
+    ///
+    /// Called automatically by value(). Not meant to be used directly.
+    #[inline]
+    fn tick(&mut self) {
         // EMA formula: current = current * α + target * (1 - α)
         // This is a one-pole lowpass filter in the time domain
         self.current = self.current * self.coeff + self.target * (1.0 - self.coeff);
