@@ -1,0 +1,9 @@
+Please update DESIGN.md with everything we've covered, including all of the details.
+Make sure you update HARDWARE.md as well with our new changes.
+Implement new philosophies as well, e.g. form factor, and don't delete old ones - e.g.
+engineer's instrument.
+
+i.e. merge the updates, don't simply delete the old file. only introduce the new changes
+based on our conversation.
+Take your time, do it methodically, and by reviewing our messages, taking into account all
+of the little details and their reasons.

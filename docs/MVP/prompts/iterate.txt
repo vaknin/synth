@@ -1,0 +1,13 @@
+Please take a look at @docs/MVP/DESIGN.md and @docs/MVP/HARDWARE.md
+I gave these two documents to an expert, and asked him to supply a feedback: @docs/MVP/expert_feedback.md
+
+Our end-goal is improving the DESIGN.md document for our synth project.
+Some of the points I've added remarks to, noted by '#### USER FEEDBACK: [my feedback] ####', please take these into account.
+
+Ask me as many questions as you need in order to finalize the DESIGN.md document and make it better.
+Please number the questions, order them by categories and give your recommendation to each question, which should be affected by industry, DYI-synths and digital-audio best-practices.
+
+
+------
+
+In all of my responses from now on, if I don't mention a specific question in my reply, please treat it as: "I agree with your recommendation, let's implement it."

@@ -1,0 +1,21 @@
+Please review these two documents.
+I want you to scrutinize everything, every possible decision we've made.
+This is a hobby-project, so I'm the only end-user, no need to think about sales, etc.
+The project is built in Rust, using the esp-hal crate.
+
+Your main target:
+Look for bad things we've done that we can fix.
+Look for good things that we can add.
+All while preserving the main constraints, e.g. physical size.
+Look for low-hanging fruits mostly, if something is 90% good, it's good enough for us. we don't seek perfection.
+
+In order to do that, conduct a thorough research online. Look in as many sources as you possibly can.
+
+In the end, I want you to generate a comprehensive report with feedback - one that we can use to iterate over our ideas in order to make this MVP as good as we can get.
+
+* are we missing anything? any gaps in our design, flaws, issues, critical problems that may occur later on?
+* How's the layout structured? please calculate it using our parts list, and see if it will actually fit, around the form factor of a Roland SP-404.
+* How's the part list? are the parts good? can we do better? did we miss anything important? e.g. resistors, diodes, etc.
+* Anything else we should be aware of before starting this project and buying all of the parts?
+
+At the end of the report, please add a section titled "Next Steps", with how we should continue right now based on the feedback given.
