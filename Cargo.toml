@@ -37,6 +37,8 @@ heapless = "0.9.1"
 micromath = { version = "2.1.0", default-features = false }
 paste = "1.0.15"
 
+[features]
+profile = []
 
 [profile.dev]
 # Rust debug is too slow.

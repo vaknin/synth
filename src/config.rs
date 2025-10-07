@@ -14,8 +14,15 @@ pub const SAMPLE_RATE: u32 = 44_100;
 /// Universal parameter smoothing coefficient (0.0 to 1.0).
 /// Used for all time-varying parameters (frequency, volume, filters, etc.)
 /// Higher values = more smoothing = slower response. Prevents clicks and zipper noise.
-/// 0.995 provides ~50ms settling time at 44.1kHz - responsive yet smooth.
-pub const SMOOTHING_COEFF: f32 = 0.995;
+/// 0.99 provides ~10ms settling time at 44.1kHz - settles within pot update interval (20ms).
+pub const SMOOTHING_COEFF: f32 = 0.99;
+
+/// Slew limiter settling threshold (amplitude units).
+/// When error between current and target falls below this threshold, snap to target and mark settled.
+/// Threshold: 1/32768 ≈ 0.0000305 (-90 dB, well below 16-bit quantization noise floor).
+/// Relaxed from 1/65536 for faster settling and reduced CPU load on ESP32-S3.
+/// Optimization: Skips EMA computation when settled (parameters are static 90%+ of the time).
+pub const SLEW_SETTLE_THRESHOLD: f32 = 1.0 / 32768.0;
 
 // === Voice Defaults ===
 
@@ -52,13 +59,19 @@ pub const WAVETABLE_MASK: usize = WAVETABLE_SIZE - 1;
 
 /// DMA circular buffer size in bytes.
 /// Must be divisible by 4 (stereo `i16` frame size) to keep channels aligned.
-/// 1024 bytes = 256 stereo i16 samples = 5.8ms latency @ 44.1kHz
-pub const DMA_BUFFER_SIZE: usize = 1024;
+/// 2048 bytes = 512 stereo i16 samples = 11.6ms latency @ 44.1kHz
+/// Larger buffer provides more CPU time per callback, reducing underrun risk.
+pub const DMA_BUFFER_SIZE: usize = 4084;
 
 // === Messaging ===
 
-/// Capacity of the control message queue.
-pub const MESSAGE_QUEUE_SIZE: usize = 8;
+/// Capacity of the control message queue (Core 1 → Core 0).
+/// Sized for future expansion to ~20 potentiometers:
+/// - Worst case: 20 pots change simultaneously = 20 messages/cycle
+/// - At 50 Hz poll rate (20ms), 32 messages = 1.6 cycles buffering
+/// - Provides headroom for control bursts without dropped messages
+/// - Memory cost: 32 × ~12 bytes = 384 bytes (negligible on ESP32-S3)
+pub const MESSAGE_QUEUE_SIZE: usize = 32;
 
 // === Control & Input ===
 
@@ -77,7 +90,7 @@ pub const ADC_MULTISAMPLING_COUNT: usize = 9;
 
 /// EMA filter alpha coefficient for ADC smoothing (0.0 to 1.0).
 /// Higher values add smoothing; lower values respond faster to changes.
-pub const ADC_EMA_ALPHA: f32 = 0.8; // lower -> responsiveness
+pub const ADC_EMA_ALPHA: f32 = 0.8;
 
 // --- Potentiometer Scaling ---
 

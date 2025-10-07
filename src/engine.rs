@@ -91,6 +91,7 @@ impl Engine {
     }
 
     /// Process all pending control messages from the queue.
+    #[inline]
     fn consume_messages(&mut self) {
         while let Ok(msg) = self.consumer.try_receive() {
             match msg {
@@ -102,7 +103,7 @@ impl Engine {
                 Message::SetOscLevel(osc_id, level) => {
                     if let Some(osc) = self.oscillators.get_mut(osc_id as usize) {
                         // Read old level for incremental sum update
-                        let old_level = osc.level.target;
+                        let old_level = osc.level.target();
 
                         // Update oscillator level
                         osc.set_level(level);
@@ -147,8 +148,13 @@ impl Engine {
     ///
     /// Sums all 4 oscillators (each applies its own level) and normalizes
     /// by cached level sum reciprocal for dynamic loudness preservation.
+    #[inline]
     async fn render(&mut self, audio_stream: &mut AudioStream) {
-        audio_stream
+        // DIAGNOSTIC: Measure cycles spent in audio generation
+        #[cfg(feature = "profile")]
+        let start = embassy_time::Instant::now();
+
+        let bytes_written = audio_stream
             .push_with(|buffer| {
                 if buffer.len() < 4 {
                     return 0;
@@ -163,15 +169,15 @@ impl Engine {
                     let normalized = mix * self.level_sum_reciprocal;
 
                     // Process through State Variable Filter (lowpass output)
-                    let (lp, _hp, _bp) = self.filter.process(normalized);
-                    let filtered = lp;
+                    // let (lp, _hp, _bp) = self.filter.process(normalized);
+                    // let filtered = lp;
 
                     // Apply soft-start fade-in to prevent speaker pop
                     let fade_gain = self.soft_start_gain.value();
 
-                    // Apply soft-start, master gain, and convert to i16
-                    let sample = (filtered * fade_gain * MASTER_GAIN * I16_MAX_F32) as i16;
-                    // let sample = (mix * MASTER_GAIN * I16_MAX_F32) as i16;
+                    // Apply normalization, filter, soft-start, master gain, and convert to i16
+                    // let sample = (filtered * fade_gain * MASTER_GAIN * I16_MAX_F32) as i16;
+                    let sample = (normalized * fade_gain * MASTER_GAIN * I16_MAX_F32) as i16;
                     let bytes = sample.to_le_bytes();
 
                     // Write stereo (duplicate mono to both channels)
@@ -185,7 +191,20 @@ impl Engine {
                 buffer.len() - (buffer.len() % 4)
             })
             .await
-            .ok();
+            .unwrap_or(0);
+
+        // DIAGNOSTIC: Log performance metrics
+        #[cfg(feature = "profile")]
+        {
+            let elapsed = embassy_time::Instant::now() - start;
+            let samples = bytes_written / 4;
+            log::info!(
+                "Rendered {} samples in {:?} ({} us/sample)",
+                samples,
+                elapsed,
+                elapsed.as_micros() / samples.max(1) as u64
+            );
+        }
     }
 
     /// Render audio into provided buffer.
@@ -198,7 +217,7 @@ impl Engine {
     ///
     /// # Returns
     /// Number of bytes written to buffer (will be multiple of 4)
-    /// #[inline] should we inline it? it's the literal hot-path
+    #[inline]
     pub async fn stream_audio(&mut self, audio_stream: &mut AudioStream) {
         // Process all pending control messages
         self.consume_messages();

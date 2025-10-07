@@ -34,7 +34,7 @@ impl Potentiometer {
             last_sent: 0.0,
             map_fn,
             samples: [0u16; ADC_MULTISAMPLING_COUNT],
-            filtered: (POT_MAX / 2) as f32, // Initialize to midpoint
+            filtered: (POT_MAX / 2) as f32,
             alpha: ADC_EMA_ALPHA,
         }
     }

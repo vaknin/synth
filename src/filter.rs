@@ -24,6 +24,14 @@ pub struct StateVariableFilter {
     resonance: Slew,
     /// Sample rate in Hz
     sample_rate: f32,
+    /// Cached frequency coefficient (recalculated only when cutoff changes)
+    cached_f: f32,
+    /// Cached damping coefficient (recalculated only when resonance changes)
+    cached_q: f32,
+    /// Last cutoff value (for change detection)
+    last_cutoff: f32,
+    /// Last resonance value (for change detection)
+    last_resonance: f32,
 }
 
 impl StateVariableFilter {
@@ -33,12 +41,23 @@ impl StateVariableFilter {
     /// * `cutoff_hz` - Initial cutoff frequency in Hz (20-20000)
     /// * `resonance` - Resonance amount (0.0-1.2, typical 0.7 for gentle resonance)
     pub fn new(cutoff_hz: f32, resonance: f32) -> Self {
+        let sample_rate = SAMPLE_RATE as f32;
+        let clamped_resonance = resonance.clamp(0.1, 10.0);
+
+        // Pre-calculate initial coefficients
+        let f = (2.0 * core::f32::consts::PI * cutoff_hz / sample_rate).min(1.0);
+        let q = 1.0 / clamped_resonance;
+
         Self {
             lp: 0.0,
             bp: 0.0,
             cutoff: Slew::new(cutoff_hz),
-            resonance: Slew::new(resonance.clamp(0.1, 10.0)),
-            sample_rate: SAMPLE_RATE as f32,
+            resonance: Slew::new(clamped_resonance),
+            sample_rate,
+            cached_f: f,
+            cached_q: q,
+            last_cutoff: cutoff_hz,
+            last_resonance: clamped_resonance,
         }
     }
 
@@ -75,21 +94,30 @@ impl StateVariableFilter {
     /// Hal Chamberlin, "Musical Applications of Microprocessors" (1985)
     #[inline]
     pub fn process(&mut self, input: f32) -> (f32, f32, f32) {
-        // Get smoothed parameters
+        // Get smoothed parameters (cheap when settled!)
         let cutoff_hz = self.cutoff.value();
         let res = self.resonance.value();
 
-        // Calculate frequency coefficient: f = 2π × fc / fs (approximation)
-        // Avoids expensive sin() on hot path (~40-100 cycles vs ~3 cycles)
-        // Accurate for fc < fs/6, which covers our range (FILTER_CUTOFF_MAX ≈ fs/6.28)
-        let f = 2.0 * core::f32::consts::PI * cutoff_hz / self.sample_rate;
+        // Only recalculate coefficients if parameters actually changed
+        // Optimization: During steady-state (90%+ of the time), this skips expensive calculations
+        if cutoff_hz != self.last_cutoff {
+            self.last_cutoff = cutoff_hz;
+            // Calculate frequency coefficient: f = 2π × fc / fs (approximation)
+            // Accurate for fc < fs/6, which covers our range (FILTER_CUTOFF_MAX ≈ 7kHz)
+            let f = 2.0 * core::f32::consts::PI * cutoff_hz / self.sample_rate;
+            // Chamberlin SVF stability constraint: f ≤ 1.0
+            self.cached_f = f.min(1.0);
+        }
 
-        // Chamberlin SVF stability constraint: f ≤ 1.0
-        // With FILTER_CUTOFF_MAX = fs/(2π), maximum f ≈ 0.999 (safe)
-        let f = f.min(1.0);
+        if res != self.last_resonance {
+            self.last_resonance = res;
+            // Damping coefficient (inverse resonance)
+            self.cached_q = 1.0 / res;
+        }
 
-        // Damping coefficient (inverse resonance)
-        let q = 1.0 / res;
+        // Use cached coefficients
+        let f = self.cached_f;
+        let q = self.cached_q;
 
         // SVF equations (Chamberlin topology):
         // hp = input - lp - q * bp

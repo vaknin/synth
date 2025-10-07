@@ -19,3 +19,4 @@
 - please number your questions so it's easier to discuss and reply. attach your recommandation to each question — based on software, hardware and digital audio best-pracrices.
 - when suggesting code to implement, think first: "can we make it more elegant and efficient? are we using best-practices to maximize performence and audio-quality?"
 - opt for using public fields instead of getter methods where it makes sense, we always prefer idiomatic and elegant Rust code
+- **CRITICAL**: Never call Slew.value() at audio rate (inside per-sample loops). Update slewed parameters once per buffer, cache the values, use cached values in the sample loop. Audio rate = 44.1kHz (per sample), Buffer rate = ~172Hz (per buffer), Control rate = 50Hz (ADC polls). Slew is for control→buffer rate smoothing only.
