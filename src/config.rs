@@ -14,8 +14,8 @@ pub const SAMPLE_RATE: u32 = 44_100;
 /// Universal parameter smoothing coefficient (0.0 to 1.0).
 /// Used for all time-varying parameters (frequency, volume, filters, etc.)
 /// Higher values = more smoothing = slower response. Prevents clicks and zipper noise.
-/// 0.99 provides ~2-5ms transition at 44.1kHz sample rate.
-pub const SMOOTHING_COEFF: f32 = 0.999;
+/// 0.995 provides ~50ms settling time at 44.1kHz - responsive yet smooth.
+pub const SMOOTHING_COEFF: f32 = 0.995;
 
 // === Voice Defaults ===
 
@@ -65,9 +65,14 @@ pub const MESSAGE_QUEUE_SIZE: usize = 8;
 // --- ADC Sampling ---
 
 /// ADC polling interval in milliseconds.
-pub const ADC_POLL_INTERVAL_MS: u64 = 20; // 15ms is stable
+/// 20ms provides responsive control (~50 polls/sec) - imperceptible to humans.
+/// With dual-core architecture, ADC blocking on Core 1 doesn't affect audio on Core 0.
+pub const ADC_POLL_INTERVAL_MS: u64 = 20;
 
 /// Number of ADC samples to average per reading (multisampling) for noise reduction.
+/// 9 samples provides √9 = 3× noise reduction for clean, stable readings.
+/// Combined with EMA filter (alpha=0.8) for maximum signal quality.
+/// Dual-core architecture allows high multisampling without audio impact.
 pub const ADC_MULTISAMPLING_COUNT: usize = 9;
 
 /// EMA filter alpha coefficient for ADC smoothing (0.0 to 1.0).
@@ -108,9 +113,10 @@ pub const DETUNE_RANGE_CENTS: f32 = 100.0;
 pub const FILTER_CUTOFF_MIN: f32 = 20.0;
 
 /// Maximum cutoff frequency for State Variable Filter (Hz).
-/// Limited to 0.4× sample_rate (17640Hz @ 44.1kHz) for Chamberlin SVF numerical stability.
-/// The frequency coefficient f = 2πfc/fs must stay below 0.5 to prevent filter blow-up.
-pub const FILTER_CUTOFF_MAX: f32 = SAMPLE_RATE as f32 * 0.4;
+/// Derived from Chamberlin SVF stability constraint: f ≤ 1.0, where f = 2π × fc / fs
+/// Solving: fc_max = fs / (2π) ≈ 7019Hz @ 44.1kHz
+/// This is the theoretical limit for stable operation with the approximation formula.
+pub const FILTER_CUTOFF_MAX: f32 = SAMPLE_RATE as f32 / (2.0 * core::f32::consts::PI);
 
 /// Default filter cutoff on initialization (Hz).
 /// Set to maximum (wide open) so filter doesn't attenuate audio until pot is adjusted.

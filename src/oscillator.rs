@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use crate::config::{DEFAULT_FREQUENCY, SAMPLE_RATE, WAVETABLE_MASK, WAVETABLE_SIZE_F32};
 use crate::slew::Slew;
 
@@ -327,8 +325,7 @@ impl Oscillator {
             }
         };
 
-        // DIAGNOSTIC: Bypass level smoothing - use target directly
-        // sample * self.level.value()
-        sample * self.level.target
+        // Apply level with smoothing
+        sample * self.level.value()
     }
 }

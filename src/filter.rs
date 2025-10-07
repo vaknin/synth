@@ -79,12 +79,14 @@ impl StateVariableFilter {
         let cutoff_hz = self.cutoff.value();
         let res = self.resonance.value();
 
-        // Calculate frequency coefficient: f = 2 * sin(π * fc / fs)
-        // Approximation for efficiency: f ≈ 2 * π * fc / fs (accurate for fc << fs)
+        // Calculate frequency coefficient: f = 2π × fc / fs (approximation)
+        // Avoids expensive sin() on hot path (~40-100 cycles vs ~3 cycles)
+        // Accurate for fc < fs/6, which covers our range (FILTER_CUTOFF_MAX ≈ fs/6.28)
         let f = 2.0 * core::f32::consts::PI * cutoff_hz / self.sample_rate;
 
-        // Clamp to stable range: f < 0.5 is critical for Chamberlin SVF stability
-        let f = f.min(0.49);
+        // Chamberlin SVF stability constraint: f ≤ 1.0
+        // With FILTER_CUTOFF_MAX = fs/(2π), maximum f ≈ 0.999 (safe)
+        let f = f.min(1.0);
 
         // Damping coefficient (inverse resonance)
         let q = 1.0 / res;

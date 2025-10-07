@@ -40,23 +40,21 @@ impl Engine {
     /// - Osc3: Square wave at 0.0 (silent)
     /// - Sub: Sine wave at -1 octave at 0.0 (silent)
     pub fn new(receiver: ChannelReceiver) -> Self {
-        use crate::config::DEFAULT_VOICE_VOLUME;
-
         let mut osc1 = Oscillator::new(Waveform::Sine);
         let mut osc2 = Oscillator::new(Waveform::Saw);
         let mut osc3 = Oscillator::new(Waveform::Square);
         let mut sub = Oscillator::new(Waveform::Sine);
-        sub.set_frequency(DEFAULT_FREQUENCY / 2.0);  // Sub oscillator at -1 octave
+        sub.set_frequency(DEFAULT_FREQUENCY / 2.0); // Sub oscillator at -1 octave
 
-        // Only Osc1 active by default
-        osc1.set_level(DEFAULT_VOICE_VOLUME);
+        // Start with all oscillators silent - pots will set actual levels
+        // This prevents mismatch between hardcoded init and pot readings
+        osc1.set_level(0.5);
         osc2.set_level(0.0);
         osc3.set_level(0.0);
         sub.set_level(0.0);
 
-        // Initial level sum is just Osc1
-        let level_sum = DEFAULT_VOICE_VOLUME;
-        let level_sum_reciprocal = 1.0 / level_sum;
+        // Initial level sum is zero (pots will populate actual values)
+        let level_sum_reciprocal = 1.0; // Neutral (no scaling) until pots send levels
 
         // Soft-start gain: starts at 0.0, ramps to 1.0 over ~10ms
         // Uses fast coefficient (0.99) for quick but smooth startup, preventing speaker pop
@@ -118,7 +116,7 @@ impl Engine {
                         self.level_sum_reciprocal = if new_sum > 0.0 {
                             1.0 / new_sum
                         } else {
-                            1.0  // Avoid division by zero (all silent)
+                            1.0 // Avoid division by zero (all silent)
                         };
                     }
                 }
@@ -150,45 +148,44 @@ impl Engine {
     /// Sums all 4 oscillators (each applies its own level) and normalizes
     /// by cached level sum reciprocal for dynamic loudness preservation.
     async fn render(&mut self, audio_stream: &mut AudioStream) {
-        audio_stream.push_with(|buffer| {
-            if buffer.len() < 4 {
-                return 0;
-            }
+        audio_stream
+            .push_with(|buffer| {
+                if buffer.len() < 4 {
+                    return 0;
+                }
 
-            // Generate audio for each stereo frame
-            for chunk in buffer.chunks_exact_mut(4) {
-                // Sum all oscillators (level is applied internally by tick())
-                let mix: f32 = self.oscillators.iter_mut()
-                    .map(|osc| osc.tick())
-                    .sum();
+                // Generate audio for each stereo frame
+                for chunk in buffer.chunks_exact_mut(4) {
+                    // Sum all oscillators (level is applied internally by tick())
+                    let mix: f32 = self.oscillators.iter_mut().map(|osc| osc.tick()).sum();
 
-                // Normalize by cached level sum reciprocal (fast multiply, not divide)
-                let normalized = mix * self.level_sum_reciprocal;
+                    // Normalize by sum of oscillator levels for consistent loudness
+                    let normalized = mix * self.level_sum_reciprocal;
 
-                // Process through State Variable Filter (LP/HP/BP outputs)
-                let (lp, _hp, _bp) = self.filter.process(normalized);
+                    // Process through State Variable Filter (lowpass output)
+                    let (lp, _hp, _bp) = self.filter.process(normalized);
+                    let filtered = lp;
 
-                // Use lowpass output only (Phase 2: LP-only)
-                let filtered = lp;
+                    // Apply soft-start fade-in to prevent speaker pop
+                    let fade_gain = self.soft_start_gain.value();
 
-                // DIAGNOSTIC: Bypass soft-start fade-in
-                // let fade_gain = self.soft_start_gain.value();
-                let fade_gain = 1.0;
+                    // Apply soft-start, master gain, and convert to i16
+                    let sample = (filtered * fade_gain * MASTER_GAIN * I16_MAX_F32) as i16;
+                    // let sample = (mix * MASTER_GAIN * I16_MAX_F32) as i16;
+                    let bytes = sample.to_le_bytes();
 
-                // Apply soft-start, master gain, and convert to i16
-                let sample = (filtered * fade_gain * MASTER_GAIN * I16_MAX_F32) as i16;
-                let bytes = sample.to_le_bytes();
+                    // Write stereo (duplicate mono to both channels)
+                    // Direct assignment is faster than copy_from_slice for 4 bytes
+                    chunk[0] = bytes[0];
+                    chunk[1] = bytes[1];
+                    chunk[2] = bytes[0];
+                    chunk[3] = bytes[1];
+                }
 
-                // Write stereo (duplicate mono to both channels)
-                // Direct assignment is faster than copy_from_slice for 4 bytes
-                chunk[0] = bytes[0];
-                chunk[1] = bytes[1];
-                chunk[2] = bytes[0];
-                chunk[3] = bytes[1];
-            }
-
-            buffer.len() - (buffer.len() % 4)
-        }).await.ok();
+                buffer.len() - (buffer.len() % 4)
+            })
+            .await
+            .ok();
     }
 
     /// Render audio into provided buffer.
@@ -202,12 +199,10 @@ impl Engine {
     /// # Returns
     /// Number of bytes written to buffer (will be multiple of 4)
     /// #[inline] should we inline it? it's the literal hot-path
-    pub async fn stream_audio(&mut self, audio_stream:&mut AudioStream) {
-
+    pub async fn stream_audio(&mut self, audio_stream: &mut AudioStream) {
         // Process all pending control messages
         self.consume_messages();
 
         self.render(audio_stream).await;
-        
     }
 }

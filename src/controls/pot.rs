@@ -11,8 +11,6 @@ use micromath::F32Ext;
 /// Each pot owns its own signal processing state (deadband, multisampling),
 /// sample buffer, and behavior (mapping function). Hardware (ADC, pins)
 /// is owned by the control task that polls all pots sequentially.
-///
-/// DIAGNOSTIC: Re-enabling ADC-side EMA to test if its removal caused crackling.
 pub struct Potentiometer {
     /// Last sent normalized value (for deadband detection)
     last_sent: f32,
@@ -36,7 +34,7 @@ impl Potentiometer {
             last_sent: 0.0,
             map_fn,
             samples: [0u16; ADC_MULTISAMPLING_COUNT],
-            filtered: (POT_MAX / 2) as f32,  // Initialize to midpoint
+            filtered: (POT_MAX / 2) as f32, // Initialize to midpoint
             alpha: ADC_EMA_ALPHA,
         }
     }
@@ -69,7 +67,7 @@ impl Potentiometer {
         let sum: u32 = self.samples.iter().map(|&s| s as u32).sum();
         let avg = (sum / self.samples.len() as u32) as f32;
 
-        // 3. DIAGNOSTIC: Re-enable ADC-side EMA filtering to test if removal caused crackling
+        // 3. EMA filtering for additional smoothing
         self.filtered = self.filtered * self.alpha + avg * (1.0 - self.alpha);
 
         // 4. Normalize to 0.0-1.0 range using calibrated min/max, defensive clamping
@@ -110,8 +108,8 @@ pub fn map_osc_detune(osc_id: crate::message::OscillatorId, normalized: f32) -> 
 
 /// Map normalized value (0.0-1.0) to filter cutoff frequency, exponentially.
 pub fn map_cutoff(normalized: f32) -> Message {
+    use crate::config::{FILTER_CUTOFF_MAX, FILTER_CUTOFF_MIN};
     use micromath::F32Ext;
-    use crate::config::{FILTER_CUTOFF_MIN, FILTER_CUTOFF_MAX};
 
     // Exponential mapping for musical frequency perception
     // Uses config constants for min/max range (safe margin below Nyquist for filter stability)
