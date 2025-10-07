@@ -16,3 +16,4 @@
 - Always build with ./scripts/build.sh
 - When adding new crates, make sure they're the latest version possible
 - We're running the project on the ESP32-S3 - a dual-core XTensa LX7 MCU
+- please number your questions so it's easier to discuss and reply. attach your recommandation to each question — based on software, hardware and digital audio best-pracrices.
