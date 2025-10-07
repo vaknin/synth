@@ -137,72 +137,151 @@ pub const SINE: [f32; 1024] = [
     -0.049068, -0.042938, -0.036807, -0.030675, -0.024541, -0.018407, -0.012272, -0.006136,
 ];
 
-/// Sine wave oscillator that generates samples from a wavetable.
+/// Waveform type for oscillator output.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Waveform {
+    /// Pure sine wave (wavetable lookup with linear interpolation)
+    Sine,
+    /// Sawtooth wave (direct computation: phase * 2.0 - 1.0)
+    Saw,
+    /// Square wave (direct computation: phase < 0.5 ? 1.0 : -1.0)
+    Square,
+}
+
+/// Multi-waveform oscillator with runtime waveform selection.
 ///
-/// Outputs normalized f32 samples in the range -1.0 to 1.0.
+/// Self-contained voice with integrated level and detuning.
+/// Outputs normalized f32 samples in the range -1.0 to 1.0, scaled by internal level.
 pub struct Oscillator {
-    /// Current position in wavetable index space (0.0 to WAVETABLE_SIZE)
-    /// Stored as index to eliminate multiply in tick()
+    /// Current phase position normalized to [0.0, 1.0) range
     phase: f32,
     /// Phase increment smoother (eliminates clicks from frequency changes)
     phase_increment: Slew,
+    /// Current frequency in Hz (stored for modulation and querying)
+    frequency: f32,
     /// Sample rate in Hz (constant for the lifetime of the oscillator)
     sample_rate: f32,
-    /// Reference to the wavetable (normalized f32 values)
-    wavetable: &'static [f32],
+    /// Waveform type (Sine uses SINE table, Saw/Square use direct computation)
+    waveform: Waveform,
+    /// Output level with smoothing (0.0-1.0, applied internally in tick())
+    /// Public for Engine to read target level for normalization caching
+    pub level: Slew,
+    /// Detune ratio for pitch offset (1.0 = no detune, 1.05 ≈ +50¢)
+    detune_ratio: f32,
 }
 
 impl Oscillator {
-    /// Create a new oscillator at the given frequency.
+    /// Create a new oscillator at the given frequency with specified waveform.
     ///
     /// # Arguments
     /// * `frequency` - Frequency in Hz (e.g., 440.0 for A4)
     /// * `sample_rate` - Sample rate in Hz (e.g., 44100.0)
-    pub fn new(frequency: f32, sample_rate: f32) -> Self {
-        // Scale phase_increment to wavetable index space
-        // This eliminates one multiply per tick()
-        let phase_inc = (frequency / sample_rate) * WAVETABLE_SIZE_F32;
+    /// * `waveform` - Waveform type (Sine/Saw/Square)
+    ///
+    /// # Returns
+    /// Oscillator with level=DEFAULT_VOICE_VOLUME and detune_ratio=1.0 (no detune)
+    pub fn new(frequency: f32, sample_rate: f32, waveform: Waveform) -> Self {
+        use crate::config::DEFAULT_VOICE_VOLUME;
+
+        // Phase increment normalized to [0.0, 1.0) per sample
+        let phase_inc = frequency / sample_rate;
         Self {
             phase: 0.0,
             phase_increment: Slew::new(phase_inc),
+            frequency,
             sample_rate,
-            wavetable: &SINE,
+            waveform,
+            level: Slew::new(DEFAULT_VOICE_VOLUME),  // Use config default
+            detune_ratio: 1.0,                        // No detune by default
         }
     }
 
-    /// Change the oscillator's frequency.
+    /// Recalculate phase increment from current frequency and detune ratio.
     ///
-    /// # Arguments
-    /// * `frequency` - New frequency in Hz
-    pub fn set_frequency(&mut self, frequency: f32) {
-        // Scale to wavetable index space (matches phase units)
-        let phase_inc = (frequency / self.sample_rate) * WAVETABLE_SIZE_F32;
+    /// Called internally whenever frequency or detune changes.
+    #[inline]
+    fn update_phase_increment(&mut self) {
+        let phase_inc = (self.frequency * self.detune_ratio) / self.sample_rate;
         self.phase_increment.set_target(phase_inc);
     }
 
-    /// Generate the next sample.
+    /// Change the oscillator's base frequency (respects current detune).
     ///
-    /// Returns a normalized f32 value in the range -1.0 to 1.0.
+    /// # Arguments
+    /// * `frequency` - New base frequency in Hz (actual frequency = frequency * detune_ratio)
+    pub fn set_frequency(&mut self, frequency: f32) {
+        self.frequency = frequency;
+        self.update_phase_increment();
+    }
+
+    /// Set the oscillator's output level (0.0-1.0).
+    ///
+    /// # Arguments
+    /// * `level` - Output level (0.0 = silent, 1.0 = full volume)
+    pub fn set_level(&mut self, level: f32) {
+        self.level.set_target(level);
+    }
+
+    /// Set the oscillator's detune in cents.
+    ///
+    /// # Arguments
+    /// * `cents` - Detune in cents (0 = no detune, +50 = sharp, -50 = flat, ±1200 = ±1 octave)
+    ///
+    /// Converts cents to frequency ratio: ratio = 2^(cents/1200)
+    /// Uses micromath for fast embedded computation.
+    pub fn set_detune_cents(&mut self, cents: f32) {
+        use micromath::F32Ext;
+
+        // Convert cents to frequency ratio: ratio = 2^(cents/1200)
+        // 0 cents → ratio 1.0, +1200 cents → ratio 2.0 (one octave up)
+        self.detune_ratio = 2.0_f32.powf(cents / 1200.0);
+        self.update_phase_increment();
+    }
+
+    /// Generate the next sample with integrated level control.
+    ///
+    /// Returns a scaled f32 value: waveform * level (typically -1.0 to 1.0 range).
     #[inline]
     pub fn tick(&mut self) -> f32 {
-
-        // Advance phase
+        // Advance phase (normalized [0.0, 1.0) range)
         self.phase += self.phase_increment.value();
 
-        // Wrap phase to [0.0, WAVETABLE_SIZE) range
-        if self.phase >= WAVETABLE_SIZE_F32 {
-            self.phase -= WAVETABLE_SIZE_F32;
+        // Wrap phase to [0.0, 1.0) range
+        if self.phase >= 1.0 {
+            self.phase -= 1.0;
         }
 
-        // Phase is already the position - no multiply needed!
-        let index = self.phase as usize;
-        let frac = self.phase - index as f32;
+        // Generate waveform sample
+        let sample = match self.waveform {
+            Waveform::Sine => {
+                // Wavetable lookup with linear interpolation
+                // Scale phase to wavetable index space
+                let table_pos = self.phase * WAVETABLE_SIZE_F32;
+                let index = table_pos as usize;
+                let frac = table_pos - index as f32;
 
-        // Use bitwise AND for wrapping (faster than modulo for power-of-2 sizes)
-        let sample1 = self.wavetable[index];
-        let sample2 = self.wavetable[(index + 1) & WAVETABLE_MASK];
+                let sample1 = SINE[index];
+                let sample2 = SINE[(index + 1) & WAVETABLE_MASK];
 
-        // FMA (fused multiply-add) - single instruction on XTensa LX7
-        sample1 + (sample2 - sample1) * frac
+                // FMA (fused multiply-add) - single instruction on XTensa LX7
+                sample1 + (sample2 - sample1) * frac
+            }
+            Waveform::Saw => {
+                // Direct sawtooth computation (faster than table lookup)
+                // Scale [0.0, 1.0) to [-1.0, 1.0)
+                (self.phase * 2.0) - 1.0
+            }
+            Waveform::Square => {
+                // Direct square wave computation (branch predictor friendly)
+                if self.phase < 0.5 {
+                    1.0
+                } else {
+                    -1.0
+                }
+            }
+        };
+
+        // Apply level control (integrated, self-contained)
+        sample * self.level.value()
     }
 }

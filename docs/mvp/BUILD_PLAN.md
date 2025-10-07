@@ -1,29 +1,8 @@
 # Drone Synthesizer MVP Build Plan
 
-High-level roadmap for building a pocket-portable monophonic drone synthesizer with professional audio quality.
+Refactoring roadmap: migrating from polyphonic voice-based architecture to monophonic drone synthesizer with professional audio quality.
 
----
-
-## Phase 0: Component Procurement (Week 1)
-
-**Status**: Not Started
-**Budget**: $20-35 (already own ESP32-S3 and PCM5102A)
-
-### Order from AliExpress/Budget Suppliers
-- [ ] 3× ADS1115 16-bit I2C ADC modules ($4.50-9 total)
-- [ ] SSD1351 1.5" OLED display 128×128 RGB ($10-15)
-- [ ] 10× B10K linear potentiometers 10kΩ ($2-6 total)
-- [ ] 2× 830-point breadboards - quality brands ($8-12 total)
-- [ ] 22 AWG solid core wire kit - multiple colors ($8-12)
-- [ ] Capacitor assortment (0.1µF, 10µF, 100-470µF) ($5-8)
-- [ ] 4.7kΩ resistors 1/4W (10× pack) ($0.50)
-- [ ] USB-C cable for programming/power ($2-4)
-
-### Verify Owned Components
-- [ ] ESP32-S3-DevKitC-1 with N8R8 (8MB PSRAM) - functional
-- [ ] PCM5102A DAC module with 3.5mm jack - functional
-
-**Shipping time**: 2-4 weeks from AliExpress, 3-7 days from domestic suppliers
+**Hardware Status**: ✅ All components available (ESP32-S3, PCM5102A, ADS1115 modules, pots, breadboards)
 
 ---
 
@@ -90,13 +69,40 @@ let cutoff = adc_values[4]; // Which pot is this? Will break when adding more po
 | **Sawtooth** | **Direct computation** | `(phase × 2.0) - 1.0` is faster than table + interpolation |
 | **Square** | **Direct computation** | Simple comparison `if phase < 0.5` beats memory access |
 
-**Implementation:**
+**Implementation (Phase 1 complete):**
 ```rust
-match self.waveform {
-    WaveformType::Sine => self.sine_table_lookup(),  // 1024-sample table, linear interpolation
-    WaveformType::Saw => (self.phase * 2.0) - 1.0,   // Direct math (faster than table)
-    WaveformType::Square => if self.phase < 0.5 { 1.0 } else { -1.0 },  // Branch predictor wins
+pub enum Waveform {
+    Sine,
+    Saw,
+    Square,
 }
+
+pub struct Oscillator {
+    phase: f32,                // Normalized [0.0, 1.0) range
+    phase_increment: Slew,     // Smoothed frequency
+    frequency: f32,            // Base frequency in Hz
+    sample_rate: f32,          // Sample rate in Hz
+    waveform: Waveform,        // Per-oscillator waveform selection
+    pub level: Slew,           // Output level (integrated)
+    detune_ratio: f32,         // Frequency multiplier
+}
+
+// In tick() method (applies level internally):
+let sample = match self.waveform {
+    Waveform::Sine => {
+        // Wavetable lookup with linear interpolation
+        let table_pos = self.phase * WAVETABLE_SIZE_F32;
+        let index = table_pos as usize;
+        let frac = table_pos - index as f32;
+        let s1 = SINE[index];
+        let s2 = SINE[(index + 1) & WAVETABLE_MASK];
+        s1 + (s2 - s1) * frac  // FMA instruction on XTensa LX7
+    }
+    Waveform::Saw => (self.phase * 2.0) - 1.0,   // Direct math (faster than table)
+    Waveform::Square => if self.phase < 0.5 { 1.0 } else { -1.0 },  // Branch predictor wins
+};
+
+sample * self.level.value()  // Apply integrated level
 ```
 
 **Memory footprint:**
@@ -111,96 +117,133 @@ match self.waveform {
 
 ### Control Message Architecture
 
-**Unified message type:**
+**Compositional message design (implemented):**
 ```rust
+pub enum OscillatorId {
+    Osc1 = 0, Osc2 = 1, Osc3 = 2, Sub = 3,
+}
+
+pub enum FilterType {
+    Lowpass = 0, Highpass = 1, Bandpass = 2,
+}
+
 pub enum Message {
-    SetControl(ControlId, f32),  // Single message type for all 22 parameters
+    // Phase 1: Oscillator Controls
+    SetMasterPitch(f32),                    // Absolute Hz
+    SetOscLevel(OscillatorId, f32),         // Reuses enum for 4 oscillators
+    SetOscDetune(OscillatorId, f32),        // Cents (converted internally)
+
+    // Phase 2: Filter Controls
+    SetCutoff(f32),                         // Normalized 0.0-1.0
+    SetResonance(f32),                      // Normalized 0.0-1.0
+    SetFilterLevel(FilterType, f32),        // Reuses enum for 3 filter outputs
 }
 ```
 
 **Benefits:**
-- ✅ Scalable: Adding controls 11-22 requires zero new message types
-- ✅ Type-safe: Enum prevents invalid control IDs
-- ✅ Clean pot code: All pots send identical message format
+- ✅ **Compositional reuse**: `SetOscLevel(OscillatorId, f32)` = 1 variant for 4 oscillators
+- ✅ **Type-safe routing**: Compiler enforces valid oscillator/filter IDs
+- ✅ **Clean message handlers**: Pattern match on variant, route by enum value
+- ✅ **Self-documenting**: Explicit intent (SetMasterPitch vs SetControl(0, val))
 
-**Message handling pattern (prevents 100+ line match):**
+**Message handling pattern:**
 ```rust
 fn consume_messages(&mut self) {
     while let Ok(msg) = self.consumer.try_receive() {
         match msg {
-            Message::SetControl(id, value) => self.handle_control(id, value),
+            Message::SetMasterPitch(freq) => self.set_master_pitch(freq),
+
+            Message::SetOscLevel(osc_id, level) => {
+                if let Some(osc) = self.oscillators.get_mut(osc_id as usize) {
+                    let old_level = osc.level.target;
+                    osc.set_level(level);
+                    // Update cached normalization reciprocal (O(1))
+                    self.update_level_sum_reciprocal(old_level, level);
+                }
+            }
+
+            Message::SetOscDetune(osc_id, cents) => {
+                if let Some(osc) = self.oscillators.get_mut(osc_id as usize) {
+                    osc.set_detune_cents(cents);  // Converts cents→ratio internally
+                }
+            }
+
+            // Phase 2 filter controls...
         }
     }
 }
 
-fn handle_control(&mut self, id: ControlId, value: f32) {
-    match id {
-        MasterPitch => self.set_master_pitch(value),      // Helper method
-        Osc1Level => self.osc1_level.set_target(value),   // Direct assignment
-        Cutoff => self.filter.set_cutoff(value),          // Delegate to module
-        // ... grouped by category, ~30 lines total
-    }
-}
-
 // Complex logic extracted to helper methods
-fn set_master_pitch(&mut self, value: f32) {
-    let freq = map_pitch(value);  // 0.0-1.0 → 30Hz-1024Hz exponential
-    self.osc1.set_frequency(freq);
-    self.osc2.set_frequency(freq * self.osc2_detune_ratio);
-    self.osc3.set_frequency(freq * self.osc3_detune_ratio);
-    self.sub_osc.set_frequency(freq * 0.5);
+fn set_master_pitch(&mut self, freq: f32) {
+    // Update Osc1, Osc2, Osc3 with base frequency
+    for osc in &mut self.oscillators[0..3] {
+        osc.set_frequency(freq);  // Respects per-osc detune ratio
+    }
+    // Sub-oscillator at -1 octave
+    self.oscillators[3].set_frequency(freq / 2.0);
 }
 ```
 
 ### Engine Structure
 
-**Monophonic architecture (replaces polyphonic Voice abstraction):**
+**Monophonic architecture (implemented - replaces polyphonic Voice abstraction):**
 ```rust
 pub struct Engine {
-    // 4 oscillator instances (direct fields for cache locality)
-    osc1: Oscillator,      // Sine
-    osc2: Oscillator,      // Sawtooth
-    osc3: Oscillator,      // Square 50%
-    sub_osc: Oscillator,   // Sine, -1 octave
+    // Array of 4 oscillators with fixed waveforms (enables clean iteration)
+    oscillators: [Oscillator; 4],
+    // [0] = Osc1 (Sine), [1] = Osc2 (Saw), [2] = Osc3 (Square), [3] = Sub (Sine @ -1 oct)
 
-    // Level controls (smoothed to prevent zipper noise)
-    osc1_level: Slew,
-    osc2_level: Slew,
-    osc3_level: Slew,
-    sub_level: Slew,
-
-    // Detuning state
-    osc2_detune_ratio: f32,  // Cached ratio for fast frequency updates
-    osc3_detune_ratio: f32,
+    // Cached reciprocal for fast normalization (multiply > divide in render loop)
+    level_sum_reciprocal: f32,
 
     // Message receiver
     consumer: ChannelReceiver,
+}
+
+pub struct Oscillator {
+    phase: f32,                   // Normalized [0.0, 1.0) range
+    phase_increment: Slew,        // Smoothed frequency changes
+    frequency: f32,               // Base frequency in Hz
+    sample_rate: f32,             // Sample rate in Hz
+    waveform: Waveform,           // Sine/Saw/Square (fixed per instance)
+    pub level: Slew,              // Output level (public for Engine normalization)
+    detune_ratio: f32,            // Frequency multiplier (1.0 = no detune)
 }
 ```
 
 **Design rationale:**
 - ✅ **No Voice abstraction:** Unnecessary overhead for monophonic synthesis
-- ✅ **Direct oscillator fields:** Cache locality (all oscillators adjacent in memory → L1 cache hits)
-- ✅ **Master pitch tracking:** Single control updates all 4 oscillators simultaneously
-- ✅ **Hot-path optimization:** `render()` has direct access to all state without indirection
-- ✅ **Slew limiters on all params:** Prevents clicks and zipper noise (5-30ms smoothing)
+- ✅ **Array of oscillators:** Clean iteration for uniform operations (vs 4 separate fields)
+- ✅ **Encapsulation:** Level & detune live in Oscillator (component owns its data)
+- ✅ **Cached normalization:** `level_sum_reciprocal` updated only on control changes (rare)
+- ✅ **Fixed waveforms per oscillator:** Each oscillator has dedicated timbre (Sine/Saw/Square/Sub)
+- ✅ **Master pitch tracking:** `set_master_pitch()` updates all 4 oscillators simultaneously
+- ✅ **Hot-path optimization:** `tick()` applies level internally, render just sums outputs
+- ✅ **Slew limiters:** Integrated into Oscillator for parameter smoothing (prevents clicks)
 
-**Rendering pipeline (Phase 1-3):**
+**Audio Format (Phase 1-3):**
+- 16-bit stereo @ 44.1kHz (simplifies initial implementation)
+- DMA buffer: 1024 bytes = 256 samples = 5.8ms latency
+- 24-bit upgrade deferred to Phase 4 (requires buffer type change `[i16]` → `[i32]`)
+
+**Rendering pipeline (Phase 1-3, implemented):**
 ```rust
-pub fn render(&mut self, buffer: &mut [i16]) {
-    for sample in buffer.chunks_exact_mut(2) {  // Stereo
-        let mixed = (self.osc1.tick() * self.osc1_level.value())
-                  + (self.osc2.tick() * self.osc2_level.value())
-                  + (self.osc3.tick() * self.osc3_level.value())
-                  + (self.sub_osc.tick() * self.sub_level.value());
+async fn render(&mut self, audio_stream: &mut AudioStream) {
+    audio_stream.push_with(|buffer| {
+        for chunk in buffer.chunks_exact_mut(4) {  // 4 bytes = stereo i16
+            // Sum all oscillators (level applied internally by tick())
+            let mix: f32 = self.oscillators.iter_mut()
+                .map(|osc| osc.tick())  // tick() returns waveform * level
+                .sum();
 
-        // Phase 1-3: Direct output
-        let output = (mixed * MASTER_GAIN * I16_MAX_F32) as i16;
+            // Normalize by cached reciprocal (fast multiply, not divide)
+            // Apply master gain and convert to i16
+            let sample = (mix * self.level_sum_reciprocal * MASTER_GAIN * I16_MAX_F32) as i16;
 
-        // Phase 4+: Add filter/drive/effects here
+        // Phase 4+: Add filter/drive/effects + upgrade to 24-bit
         // let filtered = self.filter.process(mixed);
         // let driven = self.drive.process(filtered);
-        // let output = (driven * self.master_volume.value() * I16_MAX_F32) as i16;
+        // let output = (driven * self.master_volume.value() * I24_MAX_F32) as i32;
 
         sample[0] = output;  // Left
         sample[1] = output;  // Right (mono)
@@ -210,231 +253,290 @@ pub fn render(&mut self, buffer: &mut [i16]) {
 
 ---
 
-## Phase 1: Breadboard MVP - Core Audio (Weeks 2-5)
+## Phase 1: Architecture Refactor - Polyphonic → Monophonic
 
-**Status**: Not Started
-**Goal**: Working 10-control drone synthesizer with line-level audio output
+**Status**: ✅ **COMPLETE** (2-pot test build ready for hardware)
+**Goal**: Migrate from Voice-based polyphonic to direct Oscillator-based monophonic drone architecture
 
-### Week 2: Audio Output Validation
+### Baseline (commit d9c3b67 "pre-refactor"):
+- ✅ I2S audio output @ 44.1kHz (PCM5102A DAC)
+- ✅ Parameter smoothing via Slew limiter
+- ✅ ADC pot reading with EMA filtering
+- ✅ Embassy async runtime with message passing
+- ✅ Polyphonic engine with 3 Voice instances
+- ✅ Build verified: compiles in 1.61s
 
-- [ ] Set up dual breadboard workspace with power rail distribution
-- [ ] Wire ESP32-S3 + PCM5102A on breadboard
-- [ ] Configure I2S pins (GPIO1/2/3 → BCLK/LRCK/DIN)
-- [ ] Implement 440Hz sine wave test tone in Rust
-- [ ] Verify clean audio output through powered speakers
-- [ ] Add proper decoupling capacitors (0.1µF at DAC VCC)
+### Implemented Changes:
 
-**Checkpoint**: Clean sine wave with no crackling or dropouts
+**Architecture Refactor:**
+- ✅ Removed `Voice` struct abstraction (src/voice.rs deleted)
+- ✅ Refactored `Engine` to hold **array of 4 Oscillators** (cleaner iteration vs individual fields)
+- ✅ **Encapsulated level into Oscillator**: `pub level: Slew` field (self-contained tick())
+- ✅ **Encapsulated detune into Oscillator**: `detune_ratio: f32` field (internal storage)
+- ✅ Implemented `set_master_pitch()` helper (updates all 4 oscillators simultaneously)
+- ✅ **Performance optimization**: Cached `level_sum_reciprocal` in Engine (multiply > divide in hot path)
 
-### Week 3: First Oscillator + Control Reading
+**Oscillator Improvements:**
+- ✅ Added `Waveform` enum (Sine/Saw/Square)
+- ✅ Added `waveform` field to Oscillator struct
+- ✅ Added `pub level: Slew` and `detune_ratio: f32` fields (encapsulation)
+- ✅ Implemented `set_detune_cents(cents)` with micromath `powf()` (cents → ratio conversion)
+- ✅ **Phase normalization**: Migrated from [0, 1024) to [0.0, 1.0) for clarity
+- ✅ Removed wavetable field (static SINE constant reference is faster)
+- ✅ Implemented waveform switching in `tick()` with integrated level application
+- ✅ Direct sawtooth: `(phase * 2.0) - 1.0`
+- ✅ Direct square: `if phase < 0.5 { 1.0 } else { -1.0 }`
+- ✅ Wavetable sine with linear interpolation (performance critical)
 
-- [ ] Wire first ADS1115 module to I2C bus (address 0x48)
-- [ ] Install 4.7kΩ pull-up resistors on I2C SDA/SCL lines
-- [ ] Solder wires to first potentiometer (Master Pitch)
-- [ ] Implement I2C ADC reading code in Rust
-- [ ] Implement OSC1 (sine wave) with variable pitch control
-- [ ] Add parameter smoothing (one-pole low-pass filter)
+**Message System (Compositional Design):**
+- ✅ **Compositional messages** (cleaner than unified SetControl):
+  - `Message::SetMasterPitch(f32)` - absolute Hz
+  - `Message::SetOscLevel(OscillatorId, f32)` - reuses enum, not separate variants
+  - `Message::SetOscDetune(OscillatorId, f32)` - cents (converted internally)
+- ✅ `OscillatorId` enum (Osc1/Osc2/Osc3/Sub) for type-safe routing
+- ✅ `FilterType` enum (Lowpass/Highpass/Bandpass) for Phase 2 prep
+- ✅ Phase 2 filter message stubs (SetCutoff/SetResonance/SetFilterLevel)
 
-**Checkpoint**: Pot smoothly controls oscillator pitch from ~20Hz to ~2kHz
+**Control Mapping:**
+- ✅ `map_master_pitch()`: normalized → 30-1024Hz exponential
+- ✅ `map_osc_level()`: normalized → 0.0-1.0 direct
+- ✅ `map_osc_detune()`: normalized → -50¢ to +50¢ (centered at 0.5)
+- ✅ **Current test setup**: 2 pots (GPIO1=pitch, GPIO2=osc1_level)
 
-### Week 4: Triple Oscillator System
+**Key Design Decisions Made:**
+- **Array vs separate fields**: Array enables clean iteration, uniform operations
+- **Encapsulation**: Level/detune live in Oscillator (component owns its data)
+- **Reciprocal caching**: O(1) update on control change, fast multiply in render
+- **Public fields**: `level: Slew` public for Engine normalization reads
+- **Phase space**: [0.0, 1.0) normalized (clearer than wavetable index space)
+- **Detune storage**: Internal ratio (fast), public API in cents (intuitive)
 
-- [ ] Add remaining 2× ADS1115 modules (addresses 0x49, 0x4A)
-- [ ] Solder wires to 7 more pots (OSC1/2/3 Levels, Sub Level, Cutoff, Resonance, Drive)
-- [ ] Implement OSC2 (sawtooth with PolyBLEP anti-aliasing)
-- [ ] Implement OSC3 (square wave 50% duty cycle with PolyBLEP)
-- [ ] Implement Sub-oscillator (OSC1 pitched -1 octave)
-- [ ] Implement oscillator mixer with independent level controls
+**Phase 1 Full Pot Mapping (Ready to Wire):**
+- Pot 0: `MasterPitch` (30Hz - 1024Hz exponential) ✅
+- Pot 1: `Osc1Level` (sine, 0.0 - 1.0) ✅
+- Pot 2: `Osc2Level` (saw, 0.0 - 1.0) 🔄
+- Pot 3: `Osc2Detune` (-50¢ to +50¢) 🔄
+- Pot 4: `Osc3Level` (square, 0.0 - 1.0) 🔄
+- Pot 5: `Osc3Detune` (-50¢ to +50¢) 🔄
+- Pot 6: `SubLevel` (sine -1 octave, 0.0 - 1.0) 🔄
 
-**Checkpoint**: Can blend three oscillators + sub, hear distinct waveform characters
+**Current Build Status**: ✅ Clean compilation (no warnings/errors)
 
-### Week 5: Filter + Effects Chain
-
-- [ ] Implement State Variable Filter (LP/HP/BP simultaneous outputs)
-- [ ] Add Cutoff and Resonance pot control with exponential scaling
-- [ ] Implement Drive/saturation (soft clipping waveshaping)
-- [ ] Wire final pots (Volume, potentially one spare for testing)
-- [ ] Implement master volume control with software logarithmic scaling
-- [ ] Tune parameter ranges and scaling curves
-
-**Checkpoint**: Full signal chain OSC → Filter → Drive → Output sounds musical
+**Next Steps**: Flash to hardware, test 2-pot setup, expand to 7 pots
 
 ---
 
-## Phase 2: Display Integration (Week 6)
+## Phase 2: Filter & Effects Implementation
 
 **Status**: Not Started
-**Goal**: Visual feedback with oscilloscope waveform and parameter overlay
+**Goal**: Complete signal chain with State Variable Filter (LP-only) and saturation (add 4 pots: Cutoff, Resonance, Drive, Volume)
 
-- [ ] Wire SSD1351 OLED to SPI bus (GPIO17/16/23/18/5 → CS/DC/MOSI/SCK/RST)
-- [ ] Add 0.1µF decoupling capacitor at display VCC
-- [ ] Port/integrate Adafruit_SSD1351 library for Rust (or use embedded-graphics)
-- [ ] Implement oscilloscope waveform visualization (128 pixels wide, green trace)
+**Filter Implementation (LP-Only):**
+- [ ] Implement State Variable Filter (LP/HP/BP simultaneous outputs, use LP only)
+- [ ] Add Cutoff pot control with exponential mapping (20Hz - 20kHz)
+- [ ] Add Resonance pot control (0.0 - 1.2, enable self-oscillation)
+- [ ] Test filter stability at extreme resonance values
+- [ ] Filter blend controls (LpLevel/HpLevel/BpLevel) deferred to Phase 3/4
+
+**Effects & Finalization:**
+- [ ] Implement Drive/saturation (soft clipping waveshaper)
+- [ ] Calibrate Drive curve for warmth without harshness
+- [ ] Add master Volume control with logarithmic pot scaling
+- [ ] Tune all parameter ranges for musicality
+- [ ] Document optimal control positions for various drone textures
+
+**Phase 2 Pot Mapping (adds 4 controls to Phase 1's 7 = 11 total):**
+- Pot 7: `Cutoff` (20Hz - 20kHz exponential)
+- Pot 8: `Resonance` (0.0 - 1.2, self-oscillation enabled)
+- Pot 9: `Drive` (1.0 - 10.0 saturation gain)
+- Pot 10: `Volume` (0.0 - 1.0 logarithmic)
+
+**Checkpoint**: Full OSC → Filter(LP) → Drive → Output chain sounds musical and responsive, controlled by 11 pots
+
+---
+
+## Phase 3: Performance Optimization & Refinement
+
+**Status**: Not Started
+**Goal**: Stable 44.1kHz audio with minimal CPU overhead, responsive controls, professional DSP quality
+
+**DSP Quality Improvements:**
+- [ ] Add PolyBLEP anti-aliasing to sawtooth/square oscillators
+- [ ] Add filter blend controls (LpLevel/HpLevel/BpLevel pots)
+- [ ] Test filter mode blending at various Cutoff/Resonance settings
+- [ ] Verify no aliasing artifacts in high-frequency sweeps
+
+**Performance Profiling:**
+- [ ] Profile audio callback CPU usage (target <95% utilization)
+- [ ] Add `#[inline]` attributes to hot-path functions
+- [ ] Optimize State Variable Filter tick() implementation
+- [ ] Verify DMA buffer size prevents audio underruns (1024 bytes = 5.8ms)
+
+**System Integration:**
+- [ ] Test ADC scan rate with all pots (target <25ms total scan time)
+- [ ] Ensure display updates don't interfere with audio rendering
+- [ ] Verify dual-core task distribution (audio priority on Core 1)
+- [ ] Reduce buffer to 512 bytes (2.9ms) if CPU headroom allows
+
+**Checkpoint**: Zero audio glitches, responsive controls, professional anti-aliased audio, smooth visual feedback
+
+---
+
+## Phase 4: Extended Features & Display - OPTIONAL
+
+**Status**: Not Started
+**Goal**: Add modulation, time-based effects, and visual feedback (requires scaling to 22 controls)
+
+**Modulation:**
+- [ ] Implement Filter Cutoff LFO (sine wave, 0.01-20Hz rate + depth controls)
+- [ ] Implement Pitch LFO (sine wave, 0.01-20Hz rate + depth controls)
+- [ ] Add noise generator with level control
+- [ ] Add filter mode blend (LP/HP/BP mix controls)
+
+**Time-Based Effects:**
+- [ ] Implement Delay using PSRAM buffer (time: 50ms-5sec, feedback: 0-110%)
+- [ ] Implement Reverb (4-tap FDN algorithm with mix control)
+
+**Display Integration:**
+- [ ] Wire SSD1351 OLED to SPI bus (GPIO pins TBD based on I2S/ADC assignments)
+- [ ] Integrate embedded-graphics crate for display rendering
+- [ ] Implement oscilloscope waveform visualization (128 pixels wide)
 - [ ] Implement parameter overlay display (shows control name + value)
 - [ ] Add 2-second fade timer for overlay (returns to pure waveform view)
 - [ ] Optimize SPI refresh rate for 30+ FPS without audio glitches
 
-**Checkpoint**: Real-time waveform visualization with parameter feedback on pot adjustment
+**Control Expansion:**
+- [ ] Wire additional ADS1115 modules for remaining 11 pots (controls 12-22)
+- [ ] Map remaining pots: LP/HP/BP Levels, Filter LFO Rate/Depth, Pitch LFO Rate/Depth, Delay Time/Feedback, Reverb Mix, Noise Level
+
+**Decision Point**: Only pursue if Phase 1-3 delivers satisfying core drone synthesis
 
 ---
 
-## Phase 3: Sound Design Refinement (Week 7)
+## Phase 5: Permanent Build Transition - FUTURE
 
 **Status**: Not Started
-**Goal**: Musical, expressive drone synthesis with optimized parameter ranges
+**Goal**: Portable enclosure with battery power, professional build quality
 
-- [ ] Test and tune filter cutoff range (20Hz - 20kHz, exponential mapping)
-- [ ] Test and tune resonance range (0.0 - 1.2, enable self-oscillation)
-- [ ] Verify PolyBLEP anti-aliasing eliminates harsh artifacts
-- [ ] Add white noise generator with level control (if 10th pot available)
-- [ ] Calibrate Drive saturation curve for warmth without harshness
-- [ ] Test parameter smoothing time constants (5-30ms, prevent zipper noise)
-- [ ] Document optimal pot positions for various drone textures
+**Prerequisites**: Phase 1-4 fully validated on breadboard
 
-**Checkpoint**: Can create rich, evolving drone tones; all controls feel responsive and musical
+**Power System Design:**
+- [ ] Design 18650 Li-Ion battery system with USB-C charging
+- [ ] Implement buck-boost regulation for stable 3.3V (battery: 2.5-4.2V)
+- [ ] Add low-dropout LDO for clean analog power
+- [ ] Include power switch and battery protection
 
----
+**Mechanical Design:**
+- [ ] Design/source enclosure (~178×257×72mm, pocket-portable)
+- [ ] Plan control panel layout for 22 pots + display
+- [ ] Consider 3D print vs. off-shelf enclosure options
 
-## Phase 4: Code Optimization (Week 8)
+**Perfboard Construction:**
+- [ ] Design modular board layout (power, controller, ADC bank, audio)
+- [ ] Build and validate power board standalone
+- [ ] Build ESP32 board with I2C routing for 6× ADS1115
+- [ ] Build audio output board (DAC + optional headphone amp)
+- [ ] Integrate all subsystems with proper wiring
 
-**Status**: Not Started
-**Goal**: Stable 44.1kHz audio with <5% CPU usage headroom
-
-- [ ] Profile audio callback CPU usage (should be <95% of available time)
-- [ ] Add `#[inline]` to hot-path functions (oscillators, filter, DSP)
-- [ ] Optimize State Variable Filter implementation
-- [ ] Verify 256-sample I2S buffer maintains zero underruns
-- [ ] Test ADC scan rate (should complete 22 pots in ~25ms @ 860 SPS)
-- [ ] Ensure display updates don't cause audio glitches
-- [ ] Verify dual-core architecture (Core 1 audio, Core 0 UI/display)
-
-**Checkpoint**: Audio never glitches, pots feel responsive, waveform animates smoothly
-
----
-
-## Phase 5: Extended Features (Weeks 9-10) - OPTIONAL
-
-**Status**: Not Started
-**Goal**: Add modulation and effects if Phase 1-4 proves successful
-
-### Modulation (if desired)
-- [ ] Implement Filter Cutoff LFO (sine wave, 0.01-20Hz rate + depth)
-- [ ] Implement Pitch LFO (sine wave, 0.01-20Hz rate + depth)
-- [ ] Requires 4 additional pots - may need 4th ADS1115 module
-
-### Effects (if desired)
-- [ ] Implement Delay (50ms-5sec time, 0-110% feedback) using PSRAM buffer
-- [ ] Implement Reverb (4-tap FDN algorithm, mix control)
-- [ ] Requires 2-3 additional pots
-
-**Decision point**: Only pursue if Phase 1-4 delivers satisfying core drone synthesis
-
----
-
-## Phase 6: Perfboard Transition (Weeks 11-16) - Future
-
-**Status**: Not Started
-**Goal**: Permanent build with all 22 controls, battery power, proper enclosure
-
-**Prerequisites**: Phase 1-4 completely validated and working on breadboard
-
-### Power System Components (NEW - not in Phase 1)
-- [ ] Order 18650 Li-Ion battery 3000mAh protected cell ($8-12)
-- [ ] Order TP4056 charging module with USB-C ($1-2)
-- [ ] Order TPS63070 buck-boost converter IC + supporting components ($4-8)
-  - 2.2µH inductor, 22µF input/output caps, feedback resistors
-- [ ] Order AP2112K-3.3 LDO regulator + capacitors ($1-3)
-- [ ] Order 1N5819 Schottky diode for backfeed protection ($0.50)
-- [ ] Order SPST power switch panel-mount ($1-3)
-
-### Additional Control Components
-- [ ] Order 12 more potentiometers (total 22 for full design)
-- [ ] Choose quality level: Budget Alpha ($10-15) vs Premium Bourns ($36-60)
-- [ ] Order 3 more ADS1115 modules for dual I2C bus architecture (6 total)
-- [ ] Order 22× knob caps with brass inserts ($17-44)
-
-### Audio Output Upgrade (OPTIONAL - only if headphone amp desired)
-- [ ] Order OPA1622 headphone amplifier IC ($7-9)
-- [ ] Order supporting components (resistors, capacitors per datasheet)
-- [ ] Order panel-mount 3.5mm TRS jack ($2-4)
-
-### Perfboard Construction
-- [ ] Design modular board layout (control, ADC, main controller, audio, power)
-- [ ] Order FR-4 perfboard assortment 130×180mm + smaller sizes ($15-25)
-- [ ] Build and test power board standalone (battery → 3.3V regulation)
-- [ ] Build and test ESP32 board with dual I2C buses
-- [ ] Build and test 6× ADS1115 ADC bank
-- [ ] Build and test audio output board (DAC + optional headphone amp)
-- [ ] Assemble control panel (22 pots mounted to front panel)
-- [ ] Integrate all boards with ribbon cables
-- [ ] Full system testing before enclosure closure
-
-### Enclosure and Final Assembly
-- [ ] Design/source enclosure 178×257×72mm (SP-404 size)
-- [ ] Options: 3D print ($15-25), sourced AliExpress, Hammond box ($40-80)
-- [ ] Drill 22× pot holes + display cutout + edge-mount connectors
-- [ ] Mount all components to enclosure
-- [ ] Final wiring dress and strain relief
-- [ ] Battery runtime validation (should achieve 20+ hours)
-
-**Estimated Phase 6 time**: 24-34 hours across 6 weeks
-**Estimated Phase 6 cost**: $185-293 additional (beyond Phase 1 components)
+**Final Assembly:**
+- [ ] Mount components in enclosure
+- [ ] Wire controls to ADC modules
+- [ ] Test battery runtime (target: 20+ hours)
+- [ ] Final sound validation and calibration
 
 ---
 
 ## Success Criteria
 
-### Phase 1 Complete When:
-- ✅ Triple oscillator + sub-oscillator blend creates rich timbres
-- ✅ State Variable Filter shapes tone musically
-- ✅ All 8-10 pots respond smoothly with no jitter or dead zones
-- ✅ Audio quality is clean with no crackling, noise, or glitches
-- ✅ Can create evolving drone textures for 10+ minutes continuously
+### Phase 1 (Refactor - Oscillators Only) Complete When:
+- ✅ Voice abstraction removed, direct oscillator architecture implemented
+- ✅ `WaveformType` enum added, each oscillator has fixed waveform (sine/saw/square)
+- ✅ 4 oscillators (osc1/osc2/osc3/sub) blend creates rich timbres
+- ✅ Unified `Control` enum message system handles all 22 parameters (defined, only 7 wired)
+- ✅ Master pitch control updates all 4 oscillators simultaneously
+- ✅ Detuning (osc2/osc3) creates chorus/beating effects
+- ✅ All 7 pot controls respond smoothly with parameter smoothing
+- ✅ Clean audio output with no clicks or zipper noise
+- ✅ 16-bit audio @ 44.1kHz with 5.8ms latency (1024-byte DMA buffer)
 
-### Phase 2 Complete When:
-- ✅ Oscilloscope shows real-time waveform at 30+ FPS
-- ✅ Parameter overlay appears when adjusting pots, fades after 2 seconds
-- ✅ Display updates don't cause audio interruptions
+### Phase 2 (Filter/Effects - Add 4 Pots) Complete When:
+- ✅ State Variable Filter (LP mode) shapes tone musically
+- ✅ Cutoff and Resonance controls respond smoothly
+- ✅ Drive/saturation adds warmth without harshness
+- ✅ Master volume control provides proper output scaling
+- ✅ Full signal chain OSC→Filter(LP)→Drive→Output sounds professional
+- ✅ All 11 pots wired and functional
+- ✅ Can create evolving drone textures continuously
+- ✅ 16-bit audio @ 44.1kHz with 5.8ms latency (1024-byte buffer)
 
-### Phase 6 Complete When:
-- ✅ All 22 controls functional (full DESIGN.md specification)
+### Phase 3 (Performance Optimization) Complete When:
+- ✅ PolyBLEP anti-aliasing eliminates harsh aliasing artifacts
+- ✅ Filter blend controls (LpLevel/HpLevel/BpLevel) enable unique timbres
+- ✅ Audio callback uses <95% CPU utilization
+- ✅ Zero audio glitches during continuous 10+ minute operation
+- ✅ ADC scan completes in <25ms for all wired pots
+- ✅ All controls respond within 30ms latency
+- ✅ DMA buffer shows no underruns in profiling (1024 bytes = 5.8ms)
+- ✅ Dual-core task distribution verified (audio priority on Core 1)
+
+### Phase 4 (Extended Features & Display - Optional) Complete When:
+- ✅ Filter Cutoff LFO and Pitch LFO add musical movement
+- ✅ Delay and Reverb create spatial depth
+- ✅ Noise generator adds organic texture
+- ✅ Filter mode blending (LP/HP/BP) enables unique timbres
+- ✅ All 22 controls wired and functional
+- ✅ Real-time oscilloscope waveform renders at 30+ FPS
+- ✅ Display updates don't interfere with audio rendering
+
+### Phase 5 (Permanent Build) Complete When:
+- ✅ All 22 controls functional in enclosure
 - ✅ Battery provides 20+ hours runtime
-- ✅ Pocket-portable form factor achieved (fits in hand/bag)
-- ✅ Professional build quality (no loose wires, solid panel)
+- ✅ Pocket-portable, professional build quality
 
 ---
 
 ## Risk Mitigation
 
-**Risk**: AliExpress components arrive DOA or defective
-**Mitigation**: Order from sellers with >95% rating and 1000+ orders; budget extra time for replacements
+**Risk**: Architecture refactor breaks working audio
+**Mitigation**: Work on feature branch `monophony`; keep stable polyphonic version on `main`
 
-**Risk**: Breadboard connections prove unreliable (intermittent audio)
-**Mitigation**: Use quality breadboards; add solid ground plane under breadboard; minimize wire lengths
+**Risk**: Monophonic design feels limiting after polyphonic experience
+**Mitigation**: Focus on rich timbral control (4 oscillators, filter modes, effects); drones don't need polyphony
 
-**Risk**: I2S audio has crackling/noise on breadboard
-**Mitigation**: Proper decoupling caps; separate analog/digital sections; add 22Ω series resistors if needed
+**Risk**: DMA buffer underruns during refactor
+**Mitigation**: Current 2044-byte buffer is proven stable; maintain same buffer size
 
-**Risk**: ESP32-S3 ADC noise (if using internal ADC instead of ADS1115)
-**Mitigation**: Already using ADS1115 16-bit external ADCs - correct choice
+**Risk**: Oscillator phase accumulation drift over long sessions
+**Mitigation**: Use f32 phase with proper wrapping; test 10+ minute continuous operation
 
-**Risk**: Phase 1 sound isn't satisfying, invalidates full build
-**Mitigation**: This is WHY we breadboard first - minimal $30 investment to validate concept
-
-**Risk**: 256-sample buffer causes audio underruns
-**Mitigation**: Increase to 512 samples (11.6ms latency still acceptable); optimize DSP code
+**Risk**: Filter becomes unstable at high resonance
+**Mitigation**: Clamp internal state variables; use reference SVF implementations (Hal Chamberlin, Andy Simper)
 
 ---
 
-## Current Status: Phase 0 - Ready to Order Components
+## Current Status: Phase 1 Ready to Start
 
-**Next action**: Order Phase 1 components from AliExpress/budget suppliers (estimated $20-35)
+**Pre-refactor State**: Commit d9c3b67 "pre-refactor" - working polyphonic synth with frequency/volume pots
 
-**Timeline estimate**:
-- Phase 0: 1 week (ordering + shipping wait)
-- Phase 1-4: 6-8 weeks (incremental firmware development)
-- Phase 5: Optional, 2-3 weeks if pursued
-- Phase 6: Future decision based on Phase 1-4 success
+**Audio Format Decisions**:
+- **Phase 1-3:** 16-bit stereo @ 44.1kHz (simplifies implementation)
+- **DMA Buffer:** 1024 bytes = 256 samples = 5.8ms latency (reduced from 2044 bytes/11.6ms)
+- **Phase 4:** Upgrade to 24-bit if needed for effects/final polish
 
-**Total MVP cost** (Phase 1-4): $20-35 + owned components
-**Total full build cost** (Phase 6): $233-378 including all phases
+**Phase Scope Refinements**:
+- **Phase 2:** LP-only filter (blend controls deferred)
+- **Phase 3:** Add PolyBLEP + filter blend (LpLevel/HpLevel/BpLevel)
+- **Phase 4:** Optional extended features (LFOs, effects, display)
+
+**Next Action**: Begin architecture refactor on `monophony` branch
+
+**Active Focus**:
+1. Add `WaveformType` enum to Oscillator (Sine/Saw/Square)
+2. Implement waveform switching in `tick()` method
+3. Define `Control` enum for all 22 parameters
+4. Refactor Engine to hold 4 direct Oscillator instances with fixed waveforms
+5. Remove Voice abstraction (src/voice.rs)
+6. Update message handling to unified `SetControl(Control, f32)` system
+7. Wire and map **7 initial pots**: MasterPitch, Osc1/2/3 Levels, Osc2/3 Detune, SubLevel
+
+**Branch Strategy**: Work on `monophony` branch, merge to `main` when Phase 1 complete

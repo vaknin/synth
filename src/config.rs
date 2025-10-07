@@ -52,7 +52,8 @@ pub const WAVETABLE_MASK: usize = WAVETABLE_SIZE - 1;
 
 /// DMA circular buffer size in bytes.
 /// Must be divisible by 4 (stereo `i16` frame size) to keep channels aligned.
-pub const DMA_BUFFER_SIZE: usize = 2044; // 1024, 2044 is solid
+/// 1024 bytes = 256 stereo i16 samples = 5.8ms latency @ 44.1kHz
+pub const DMA_BUFFER_SIZE: usize = 1024;
 
 // === Messaging ===
 

@@ -13,7 +13,6 @@ pub mod hardware;
 pub mod message;
 pub mod oscillator;
 pub mod slew;
-pub mod voice;
 
 pub type AudioStream = I2sWriteDmaTransferAsync<'static, &'static mut [u8]>;
 pub type SynthChannel = Channel<ChannelMutex, Message, MESSAGE_QUEUE_SIZE>;

@@ -17,3 +17,5 @@
 - When adding new crates, make sure they're the latest version possible
 - We're running the project on the ESP32-S3 - a dual-core XTensa LX7 MCU
 - please number your questions so it's easier to discuss and reply. attach your recommandation to each question — based on software, hardware and digital audio best-pracrices.
+- when suggesting code to implement, think first: "can we make it more elegant and efficient? are we using best-practices to maximize performence and audio-quality?"
+- opt for using public fields instead of getter methods where it makes sense, we always prefer idiomatic and elegant Rust code

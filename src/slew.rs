@@ -22,8 +22,8 @@ use crate::config::SMOOTHING_COEFF as SLEW_COEFF;
 pub struct Slew {
     /// Current smoothed value (private - access via value())
     current: f32,
-    /// Target value to reach
-    target: f32,
+    /// Target value to reach (public for caching/normalization reads)
+    pub target: f32,
     /// Smoothing coefficient
     coeff: f32
 }

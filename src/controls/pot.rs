@@ -91,25 +91,23 @@ impl Potentiometer {
     }
 }
 
-fn apply_logarithmic_curve(val: f32) -> f32 {
-    val.powi(POT_EXPONENT_SCALE)
-}
+// === Phase 1: Oscillator Control Mappings ===
 
-/// Map normalized potentiometer value to frequency (Hz), logarithmically
-pub fn map_freq(normalized: f32) -> Message {
-    let curved = apply_logarithmic_curve(normalized);
+/// Map normalized value (0.0-1.0) to master pitch frequency (30Hz-1024Hz), logarithmically.
+pub fn map_master_pitch(normalized: f32) -> Message {
+    let curved = normalized.powi(POT_EXPONENT_SCALE);
     let freq = FREQUENCY_MIN + (FREQUENCY_MAX - FREQUENCY_MIN) * curved;
-    Message::SetFrequency(freq)
+    Message::SetMasterPitch(freq)
 }
 
-/// Map normalized potentiometer value to volume using dB calculation
-pub fn map_vol(normalized: f32) -> Message {
-    #[allow(non_snake_case)]
-    let dB = MIN_DB + normalized * (MAX_DB - MIN_DB);
-    let volume = (10f32).powf(dB/20.0);
-    debug_assert!((0.0..=1.0).contains(&volume),
-        "volume out of bounds: {} (dB: {}, normalized: {})",
-        volume, dB, normalized
-    );
-    Message::SetVolume(volume)
+/// Map normalized value (0.0-1.0) to oscillator level.
+pub fn map_osc_level(osc_id: crate::message::OscillatorId, normalized: f32) -> Message {
+    Message::SetOscLevel(osc_id, normalized)
+}
+
+/// Map normalized value (0.0-1.0) to detune in cents (-50¢ to +50¢).
+pub fn map_osc_detune(osc_id: crate::message::OscillatorId, normalized: f32) -> Message {
+    // Map 0.0-1.0 to -50 to +50 cents (centered at 0.5)
+    let cents = (normalized - 0.5) * 100.0;
+    Message::SetOscDetune(osc_id, cents)
 }
