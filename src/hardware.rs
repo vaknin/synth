@@ -19,20 +19,22 @@ pub struct AdcBus {
 pub type PotPin<P> = AdcPin<P, ADC1<'static>, AdcCalCurve<ADC1<'static>>>;
 pub type Adc1 = Adc<'static, ADC1<'static>, Blocking>;
 
-// GPIO type aliases for ADC pins (Phase 2: 5 pots)
+// GPIO type aliases for ADC pins (Phase 2: 6 pots)
 type GPIO1 = peripherals::GPIO1<'static>;
 type GPIO2 = peripherals::GPIO2<'static>;
 type GPIO3 = peripherals::GPIO3<'static>;
 type GPIO4 = peripherals::GPIO4<'static>;
 type GPIO5 = peripherals::GPIO5<'static>;
+type GPIO6 = peripherals::GPIO6<'static>;
 
-// Generate AnyAdcPin enum + setup_adc! macro for 5 pots
+// Generate AnyAdcPin enum + setup_adc! macro for 6 pots
 adc_pins! {
     1: GPIO1,
     2: GPIO2,
     3: GPIO3,
     4: GPIO4,
     5: GPIO5,
+    6: GPIO6,
 }
 
 /// Initialize I2S audio output and return ready-to-use DMA transaction.

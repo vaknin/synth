@@ -70,6 +70,7 @@ async fn main(_spawner: Spawner) {
         peripherals.GPIO3,
         peripherals.GPIO4,
         peripherals.GPIO5,
+        peripherals.GPIO6,
     );
 
     // Start Core 1 (APP_CPU) for ADC polling - offload blocking ADC reads to secondary core

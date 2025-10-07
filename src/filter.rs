@@ -2,6 +2,8 @@
 //!
 //! Provides simultaneous lowpass, highpass, and bandpass outputs.
 //! Uses Chamberlin topology for numerical stability and efficiency.
+//!
+//! Optimized: Parameters smoothed at buffer rate, coefficients cached for audio rate.
 
 use crate::config::{
     FILTER_CUTOFF_MAX, FILTER_INTEGRATOR_LIMIT, SAMPLE_RATE,
@@ -12,26 +14,25 @@ use crate::slew::Slew;
 ///
 /// Digital implementation of analog SVF topology (Chamberlin).
 /// Self-oscillates at high resonance (~1.0+), stable up to Nyquist.
+///
+/// Call update_coefficients() once per buffer, then process() at audio rate.
 pub struct StateVariableFilter {
     /// Lowpass integrator state
     lp: f32,
     /// Bandpass integrator state
     bp: f32,
-    /// Cutoff frequency in Hz (smoothed)
+    /// Cutoff frequency in Hz (smoothed at buffer rate)
     cutoff: Slew,
     /// Resonance amount (0.0 = no resonance, 1.0+ = self-oscillation)
-    /// Stored as smoothed Slew for parameter automation
     resonance: Slew,
     /// Sample rate in Hz
     sample_rate: f32,
-    /// Cached frequency coefficient (recalculated only when cutoff changes)
+    /// Cached frequency coefficient: f = 2π × fc/fs (updated per buffer)
     cached_f: f32,
-    /// Cached damping coefficient (recalculated only when resonance changes)
+    /// Cached damping coefficient: q = 1/resonance (updated per buffer)
     cached_q: f32,
-    /// Last cutoff value (for change detection)
-    last_cutoff: f32,
-    /// Last resonance value (for change detection)
-    last_resonance: f32,
+    /// Whether to clamp integrators (true when resonance > 2.0)
+    needs_clamping: bool,
 }
 
 impl StateVariableFilter {
@@ -56,8 +57,7 @@ impl StateVariableFilter {
             sample_rate,
             cached_f: f,
             cached_q: q,
-            last_cutoff: cutoff_hz,
-            last_resonance: clamped_resonance,
+            needs_clamping: clamped_resonance > 2.0,
         }
     }
 
@@ -67,7 +67,6 @@ impl StateVariableFilter {
     /// * `freq` - Cutoff frequency in Hz (FILTER_CUTOFF_MIN to FILTER_CUTOFF_MAX)
     #[inline]
     pub fn set_cutoff(&mut self, freq: f32) {
-        // Clamp to safe range using config constants
         let safe_freq = freq.clamp(crate::config::FILTER_CUTOFF_MIN, FILTER_CUTOFF_MAX);
         self.cutoff.set_target(safe_freq);
     }
@@ -82,7 +81,29 @@ impl StateVariableFilter {
         self.resonance.set_target(safe_resonance);
     }
 
+    /// Update filter coefficients from smoothed parameters.
+    ///
+    /// Call once per buffer before processing samples.
+    /// Advances Slew state and recalculates f and q coefficients.
+    #[inline]
+    pub fn update_coefficients(&mut self) {
+        // Advance smoothing (buffer rate, not audio rate!)
+        let cutoff_hz = self.cutoff.value();
+        let res = self.resonance.value();
+
+        // Recalculate frequency coefficient: f = 2π × fc/fs
+        self.cached_f = (2.0 * core::f32::consts::PI * cutoff_hz / self.sample_rate).min(1.0);
+
+        // Recalculate damping coefficient: q = 1/resonance
+        self.cached_q = 1.0 / res;
+
+        // Conditional clamping: only needed at high resonance
+        self.needs_clamping = res > 2.0;
+    }
+
     /// Process one sample through the filter (all three outputs).
+    ///
+    /// Uses cached coefficients - call update_coefficients() once per buffer first.
     ///
     /// # Arguments
     /// * `input` - Input sample
@@ -94,28 +115,7 @@ impl StateVariableFilter {
     /// Hal Chamberlin, "Musical Applications of Microprocessors" (1985)
     #[inline]
     pub fn process(&mut self, input: f32) -> (f32, f32, f32) {
-        // Get smoothed parameters (cheap when settled!)
-        let cutoff_hz = self.cutoff.value();
-        let res = self.resonance.value();
-
-        // Only recalculate coefficients if parameters actually changed
-        // Optimization: During steady-state (90%+ of the time), this skips expensive calculations
-        if cutoff_hz != self.last_cutoff {
-            self.last_cutoff = cutoff_hz;
-            // Calculate frequency coefficient: f = 2π × fc / fs (approximation)
-            // Accurate for fc < fs/6, which covers our range (FILTER_CUTOFF_MAX ≈ 7kHz)
-            let f = 2.0 * core::f32::consts::PI * cutoff_hz / self.sample_rate;
-            // Chamberlin SVF stability constraint: f ≤ 1.0
-            self.cached_f = f.min(1.0);
-        }
-
-        if res != self.last_resonance {
-            self.last_resonance = res;
-            // Damping coefficient (inverse resonance)
-            self.cached_q = 1.0 / res;
-        }
-
-        // Use cached coefficients
+        // Use cached coefficients (no smoothing, no branches!)
         let f = self.cached_f;
         let q = self.cached_q;
 
@@ -129,10 +129,11 @@ impl StateVariableFilter {
         // lp = lp + f * bp  (lowpass integrator)
         self.lp += f * self.bp;
 
-        // Integrator state limiting to prevent unbounded growth/distortion
-        // Uses config constant for headroom (allows resonance peaks while preventing runaway)
-        self.bp = self.bp.clamp(-FILTER_INTEGRATOR_LIMIT, FILTER_INTEGRATOR_LIMIT);
-        self.lp = self.lp.clamp(-FILTER_INTEGRATOR_LIMIT, FILTER_INTEGRATOR_LIMIT);
+        // Conditional integrator clamping (only at high resonance > 2.0)
+        if self.needs_clamping {
+            self.bp = self.bp.clamp(-FILTER_INTEGRATOR_LIMIT, FILTER_INTEGRATOR_LIMIT);
+            self.lp = self.lp.clamp(-FILTER_INTEGRATOR_LIMIT, FILTER_INTEGRATOR_LIMIT);
+        }
 
         // Return all three outputs
         (self.lp, hp, self.bp)

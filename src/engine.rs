@@ -154,13 +154,22 @@ impl Engine {
         #[cfg(feature = "profile")]
         let start = embassy_time::Instant::now();
 
+        #[cfg_attr(not(feature = "profile"), allow(unused_variables))]
         let bytes_written = audio_stream
             .push_with(|buffer| {
                 if buffer.len() < 4 {
                     return 0;
                 }
 
-                // Generate audio for each stereo frame
+                // Update all smoothed parameters ONCE per buffer (not per sample!)
+                // This is buffer-rate smoothing: ~172Hz instead of 44.1kHz
+                for osc in &mut self.oscillators {
+                    osc.update_parameters();
+                }
+                self.filter.update_coefficients();
+                // Soft-start is intentionally audio-rate (it's an envelope, not a parameter)
+
+                // Generate audio for each stereo frame - SUPER HOT PATH!
                 for chunk in buffer.chunks_exact_mut(4) {
                     // Sum all oscillators (level is applied internally by tick())
                     let mix: f32 = self.oscillators.iter_mut().map(|osc| osc.tick()).sum();

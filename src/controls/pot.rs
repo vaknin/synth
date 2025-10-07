@@ -20,7 +20,8 @@ pub struct Potentiometer {
     samples: [u16; ADC_MULTISAMPLING_COUNT],
     /// EMA filtered value (ADC-side smoothing)
     filtered: f32,
-    /// EMA alpha coefficient
+    /// EMA alpha coefficient (currently unused - testing single-stage smoothing)
+    #[allow(dead_code)]
     alpha: f32,
 }
 
@@ -68,7 +69,11 @@ impl Potentiometer {
         let avg = (sum / self.samples.len() as u32) as f32;
 
         // 3. EMA filtering for additional smoothing
-        self.filtered = self.filtered * self.alpha + avg * (1.0 - self.alpha);
+        // EXPERIMENTAL: Commented out to test single-stage smoothing (Slew only)
+        // Multisampling (9×) + Slew (buffer rate) should be sufficient
+        // If readings are jittery, re-enable this line
+        // self.filtered = self.filtered * self.alpha + avg * (1.0 - self.alpha);
+        self.filtered = avg; // Direct use of averaged value
 
         // 4. Normalize to 0.0-1.0 range using calibrated min/max, defensive clamping
         let normalized = (self.filtered / (POT_MAX as f32)).clamp(0.0, 1.0);
@@ -116,4 +121,16 @@ pub fn map_cutoff(normalized: f32) -> Message {
     let curved = normalized.powi(POT_EXPONENT_SCALE);
     let freq = FILTER_CUTOFF_MIN * (FILTER_CUTOFF_MAX / FILTER_CUTOFF_MIN).powf(curved);
     Message::SetCutoff(freq)
+}
+
+/// Map normalized value (0.0-1.0) to filter resonance (0.1-1.2).
+///
+/// Range allows gentle filtering at minimum, self-oscillation at maximum.
+/// The filter's internal clamping (0.1-10.0) handles any edge cases.
+pub fn map_resonance(normalized: f32) -> Message {
+    const RESONANCE_MIN: f32 = 0.1;  // Gentle filtering (minimal peak)
+    const RESONANCE_MAX: f32 = 1.2;  // Self-oscillation enabled
+
+    let resonance = RESONANCE_MIN + (RESONANCE_MAX - RESONANCE_MIN) * normalized;
+    Message::SetResonance(resonance)
 }

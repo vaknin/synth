@@ -269,13 +269,25 @@ impl Oscillator {
         self.update_phase_increment();
     }
 
+    /// Update smoothed parameters (call once per buffer, not per sample).
+    ///
+    /// Advances phase_increment and level Slew states.
+    /// Call this before the sample loop, then use tick() at audio rate.
+    #[inline]
+    pub fn update_parameters(&mut self) {
+        // Advance smoothing (buffer rate!)
+        self.phase_increment.value();
+        self.level.value();
+    }
+
     /// Generate the next sample with integrated level control.
     ///
+    /// Uses cached parameter values - call update_parameters() once per buffer first.
     /// Returns a scaled f32 value: waveform * level (typically -1.0 to 1.0 range).
     #[inline]
     pub fn tick(&mut self) -> f32 {
-        // Cache phase increment (critical: value() advances slew state, call only once)
-        let phase_inc = self.phase_increment.value();
+        // Use cached phase increment (no smoothing, no branching!)
+        let phase_inc = self.phase_increment.current();
 
         // Advance phase (normalized [0.0, 1.0) range)
         self.phase += phase_inc;
@@ -325,7 +337,7 @@ impl Oscillator {
             }
         };
 
-        // Apply level with smoothing
-        sample * self.level.value()
+        // Apply cached level (no smoothing!)
+        sample * self.level.current()
     }
 }

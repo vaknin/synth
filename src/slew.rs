@@ -81,10 +81,28 @@ impl Slew {
         self.target
     }
 
-    /// Get next smoothed value.
+    /// Get current smoothed value without advancing state.
     ///
-    /// Advances the internal state and returns the current smoothed value.
-    /// Call once per audio sample when you need the parameter value.
+    /// Zero-cost read for audio-rate loops. Use this in per-sample loops
+    /// after calling value() once at buffer rate.
+    ///
+    /// **Pattern:**
+    /// ```
+    /// // Once per buffer:
+    /// self.param.value();
+    ///
+    /// // In sample loop:
+    /// let p = self.param.current();
+    /// ```
+    #[inline]
+    pub fn current(&self) -> f32 {
+        self.current
+    }
+
+    /// Get next smoothed value (advances state).
+    ///
+    /// Call once per buffer, then use current() in the sample loop.
+    /// Do NOT call this at audio rate (44.1kHz) - only at buffer rate (~172Hz).
     ///
     /// **Optimization:** Skips EMA computation when settled (90% of the time).
     /// Settling threshold: when error becomes negligible (< 1/65536 for 16-bit audio).

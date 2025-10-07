@@ -30,7 +30,7 @@ pub const SLEW_SETTLE_THRESHOLD: f32 = 1.0 / 32768.0;
 pub const DEFAULT_FREQUENCY: f32 = 77.0;
 
 /// Default volume level for voices (0.0 to 1.0).
-pub const DEFAULT_VOICE_VOLUME: f32 = 0.9;
+pub const DEFAULT_VOICE_VOLUME: f32 = 0.3;
 
 // === Output Level Management ===
 
@@ -42,7 +42,7 @@ pub const MAX_DB: f32 = 0.0;
 
 /// Master output gain applied after voice mixing (0.0 to 1.0).
 /// Provides headroom even when all voices are at max volume (0.95 ≈ -0.45 dB).
-pub const MASTER_GAIN: f32 = 0.85;
+pub const MASTER_GAIN: f32 = 0.01;
 
 // === Wavetable ===
 
@@ -125,11 +125,17 @@ pub const DETUNE_RANGE_CENTS: f32 = 100.0;
 /// 20Hz is below the threshold of human hearing (useful for removing DC offset).
 pub const FILTER_CUTOFF_MIN: f32 = 20.0;
 
+/// Chamberlin SVF stability margin (must be < 1.0 for stable operation).
+/// The coefficient f = 2π × fc/fs must stay below 1.0. Using 0.95 provides 5% safety margin
+/// to prevent runaway oscillation at maximum cutoff while still reaching ~6668Hz.
+pub const FILTER_STABILITY_MARGIN: f32 = 0.95;
+
 /// Maximum cutoff frequency for State Variable Filter (Hz).
-/// Derived from Chamberlin SVF stability constraint: f ≤ 1.0, where f = 2π × fc / fs
-/// Solving: fc_max = fs / (2π) ≈ 7019Hz @ 44.1kHz
-/// This is the theoretical limit for stable operation with the approximation formula.
-pub const FILTER_CUTOFF_MAX: f32 = SAMPLE_RATE as f32 / (2.0 * core::f32::consts::PI);
+/// Derived from Chamberlin SVF stability: f < 1.0, where f = 2π × fc / fs
+/// With stability margin: fc_max = (fs / 2π) × 0.95 ≈ 6668Hz @ 44.1kHz
+/// Theoretical limit is 7019Hz, but margin prevents instability at pot maximum.
+pub const FILTER_CUTOFF_MAX: f32 =
+    SAMPLE_RATE as f32 / (2.0 * core::f32::consts::PI) * FILTER_STABILITY_MARGIN;
 
 /// Default filter cutoff on initialization (Hz).
 /// Set to maximum (wide open) so filter doesn't attenuate audio until pot is adjusted.
