@@ -43,6 +43,21 @@ impl Slew {
         }
     }
 
+    /// Create a new slew limiter with custom coefficient.
+    ///
+    /// Allows per-instance smoothing speed control (e.g., fast soft-start vs slow parameter smoothing).
+    ///
+    /// # Arguments
+    /// * `initial_value` - Starting value (also used as initial target)
+    /// * `coeff` - Smoothing coefficient (0.0-1.0). Higher = slower. Use 0.99 for ~10ms rise, 0.999 for ~100ms.
+    pub fn with_coeff(initial_value: f32, coeff: f32) -> Self {
+        Self {
+            current: initial_value,
+            target: initial_value,
+            coeff
+        }
+    }
+
     /// Set new target value to smoothly transition to.
     ///
     /// The slew limiter will exponentially approach this value over subsequent value() calls.

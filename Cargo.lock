@@ -1190,6 +1190,7 @@ dependencies = [
  "heapless 0.9.1",
  "log",
  "micromath",
+ "paste",
  "static_cell",
 ]
 

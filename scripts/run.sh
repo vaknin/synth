@@ -1,1 +1,1 @@
-source ~/Projects/synth/scripts/env.sh && cargo run --profile=dev
+source ~/Projects/synth/scripts/env.sh && cargo run --profile=dev; clear

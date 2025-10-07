@@ -15,7 +15,7 @@ pub const SAMPLE_RATE: u32 = 44_100;
 /// Used for all time-varying parameters (frequency, volume, filters, etc.)
 /// Higher values = more smoothing = slower response. Prevents clicks and zipper noise.
 /// 0.99 provides ~2-5ms transition at 44.1kHz sample rate.
-pub const SMOOTHING_COEFF: f32 = 0.99;
+pub const SMOOTHING_COEFF: f32 = 0.999;
 
 // === Voice Defaults ===
 
@@ -72,7 +72,7 @@ pub const ADC_MULTISAMPLING_COUNT: usize = 9;
 
 /// EMA filter alpha coefficient for ADC smoothing (0.0 to 1.0).
 /// Higher values add smoothing; lower values respond faster to changes.
-pub const ADC_EMA_ALPHA: f32 = 0.6; // lower -> responsiveness
+pub const ADC_EMA_ALPHA: f32 = 0.8; // lower -> responsiveness
 
 // --- Potentiometer Scaling ---
 
@@ -84,7 +84,7 @@ pub const POT_MAX: u16 = 3156;
 
 /// Normalized threshold before treating a potentiometer change as meaningful.
 /// 0.001 roughly maps to ~1 Hz increments across the usable range.
-pub const POT_CHANGE_THRESHOLD: f32 = 0.001;
+pub const POT_CHANGE_THRESHOLD: f32 = 0.0005;
 
 /// Exponent used when shaping the potentiometer response curve.
 pub const POT_EXPONENT_SCALE: i32 = 2;
@@ -94,3 +94,35 @@ pub const FREQUENCY_MIN: f32 = 30.0;
 
 /// Maximum frequency target for potentiometer control (Hz).
 pub const FREQUENCY_MAX: f32 = 1024.0;
+
+/// Detune range in cents (applied as ±DETUNE_RANGE_CENTS).
+/// 100 cents = 1 semitone, 200 cents = 2 semitones.
+/// Larger values create more dramatic detuning effects for drone synthesis.
+/// Range: pot center = 0¢, pot min = -DETUNE_RANGE_CENTS, pot max = +DETUNE_RANGE_CENTS
+pub const DETUNE_RANGE_CENTS: f32 = 100.0;
+
+// === State Variable Filter ===
+
+/// Minimum cutoff frequency for State Variable Filter (Hz).
+/// 20Hz is below the threshold of human hearing (useful for removing DC offset).
+pub const FILTER_CUTOFF_MIN: f32 = 20.0;
+
+/// Maximum cutoff frequency for State Variable Filter (Hz).
+/// Limited to 0.4× sample_rate (17640Hz @ 44.1kHz) for Chamberlin SVF numerical stability.
+/// The frequency coefficient f = 2πfc/fs must stay below 0.5 to prevent filter blow-up.
+pub const FILTER_CUTOFF_MAX: f32 = SAMPLE_RATE as f32 * 0.4;
+
+/// Default filter cutoff on initialization (Hz).
+/// Set to maximum (wide open) so filter doesn't attenuate audio until pot is adjusted.
+/// This prevents silence if GPIO5 pot starts at minimum position.
+pub const FILTER_CUTOFF_DEFAULT: f32 = FILTER_CUTOFF_MAX;
+
+/// Default filter resonance on initialization (dimensionless Q factor).
+/// 0.7 provides gentle resonance without excessive peaking or ringing.
+/// Range: 0.1 (heavily damped) to 10.0 (self-oscillation).
+pub const FILTER_RESONANCE_DEFAULT: f32 = 0.7;
+
+/// Filter integrator state limit (dimensionless, ±full scale amplitude).
+/// Prevents unbounded growth of lowpass/bandpass integrator states at high resonance.
+/// ±5.0 allows up to 5× amplification beyond normalized ±1.0 input (headroom for resonance peaks).
+pub const FILTER_INTEGRATOR_LIMIT: f32 = 5.0;

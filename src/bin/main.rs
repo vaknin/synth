@@ -33,28 +33,23 @@ async fn main(spawner: Spawner) {
     let consumer = CHANNEL.receiver();
     let producer = CHANNEL.sender();
 
-    // Initialize synth with test messages (Phase 1: Oscillator control)
-    producer.send(Message::SetMasterPitch(77.0)).await;
-    producer
-        .send(Message::SetOscLevel(
-            synth::message::OscillatorId::Osc1,
-            0.9,
-        ))
-        .await;
-
     // Initialize I2S audio hardware
     #[allow(clippy::manual_div_ceil)]
     let (_, _, tx_buffer, tx_descriptors) = dma_circular_buffers!(0, DMA_BUFFER_SIZE);
 
-    // Initialize ADC for potentiometers (freq on GPIO1, vol on GPIO2)
-    let (adc_bus, freq_pin, vol_pin) =
-        hardware::setup_adc(peripherals.ADC1, peripherals.GPIO1, peripherals.GPIO2);
+    // Initialize ADC for 5 potentiometers (GPIO1-5)
+    let (adc_bus, pins) = hardware::setup_adc(
+        peripherals.ADC1,
+        peripherals.GPIO1,
+        peripherals.GPIO2,
+        peripherals.GPIO3,
+        peripherals.GPIO4,
+        peripherals.GPIO5,
+    );
 
-    // Spawn pot task to read both potentiometers
+    // Spawn pot task to read all potentiometers
     spawner
-        .spawn(synth::controls::pot_task(
-            producer, adc_bus, freq_pin, vol_pin,
-        ))
+        .spawn(synth::controls::pot_task(producer, adc_bus, pins))
         .unwrap();
 
     let mut audio_stream: AudioStream = hardware::setup_audio(

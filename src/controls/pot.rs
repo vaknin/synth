@@ -2,30 +2,28 @@
 
 use crate::config::*;
 use crate::controls::CtrlSender;
-use crate::hardware::PotPin;
 use crate::message::Message;
-use esp_hal::analog::adc::{Adc, AdcChannel};
-use esp_hal::peripherals::ADC1;
-use esp_hal::Blocking;
 use log::warn;
 use micromath::F32Ext;
 
 /// Potentiometer with filtering, deadband, and parameter mapping.
 ///
-/// Each pot owns its own signal processing state (EMA filter, deadband),
+/// Each pot owns its own signal processing state (deadband, multisampling),
 /// sample buffer, and behavior (mapping function). Hardware (ADC, pins)
 /// is owned by the control task that polls all pots sequentially.
+///
+/// DIAGNOSTIC: Re-enabling ADC-side EMA to test if its removal caused crackling.
 pub struct Potentiometer {
-    /// EMA filtered value
-    filtered: f32,
-    /// Filter coefficient (0.0 to 1.0, higher = more smoothing)
-    alpha: f32,
     /// Last sent normalized value (for deadband detection)
     last_sent: f32,
     /// Mapping function from normalized value to Message
     map_fn: fn(f32) -> Message,
     /// Sample buffer for multisampling (reused each poll)
     samples: [u16; ADC_MULTISAMPLING_COUNT],
+    /// EMA filtered value (ADC-side smoothing)
+    filtered: f32,
+    /// EMA alpha coefficient
+    alpha: f32,
 }
 
 impl Potentiometer {
@@ -35,11 +33,11 @@ impl Potentiometer {
     /// * `map_fn` - Function to map normalized value (0.0-1.0) to Message
     pub fn new(map_fn: fn(f32) -> Message) -> Self {
         Self {
-            filtered: ((POT_MIN + POT_MAX) / 2) as f32,
-            alpha: ADC_EMA_ALPHA,
             last_sent: 0.0,
             map_fn,
             samples: [0u16; ADC_MULTISAMPLING_COUNT],
+            filtered: (POT_MAX / 2) as f32,  // Initialize to midpoint
+            alpha: ADC_EMA_ALPHA,
         }
     }
 
@@ -55,26 +53,23 @@ impl Potentiometer {
     ///
     /// # Arguments
     /// * `sender` - Embassy channel sender
-    /// * `adc` - ADC peripheral (borrowed from control task)
-    /// * `pin` - Potentiometer GPIO pin (borrowed from control task)
-    pub async fn poll_and_send<P>(
+    /// * `pin` - Type-erased ADC pin (contains ADC reference internally)
+    pub async fn poll_and_send(
         &mut self,
         sender: CtrlSender,
-        adc: &mut Adc<'static, ADC1<'static>, Blocking>,
-        pin: &mut PotPin<P>,
-    ) where
-        P: AdcChannel,
-    {
+        pin: &mut crate::hardware::AnyAdcPin,
+        adc: &mut crate::hardware::Adc1,
+    ) {
         // 1. Multisample: read N samples into internal buffer
         for sample in self.samples.iter_mut() {
-            *sample = adc.read_blocking(pin);
+            *sample = pin.read_blocking(adc);
         }
 
         // 2. Average samples (multisampling reduces noise)
         let sum: u32 = self.samples.iter().map(|&s| s as u32).sum();
         let avg = (sum / self.samples.len() as u32) as f32;
 
-        // 3. Apply EMA filter: filtered = alpha * filtered + (1-alpha) * new
+        // 3. DIAGNOSTIC: Re-enable ADC-side EMA filtering to test if removal caused crackling
         self.filtered = self.filtered * self.alpha + avg * (1.0 - self.alpha);
 
         // 4. Normalize to 0.0-1.0 range using calibrated min/max, defensive clamping
@@ -105,9 +100,22 @@ pub fn map_osc_level(osc_id: crate::message::OscillatorId, normalized: f32) -> M
     Message::SetOscLevel(osc_id, normalized)
 }
 
-/// Map normalized value (0.0-1.0) to detune in cents (-50¢ to +50¢).
+/// Map normalized value (0.0-1.0) to detune in cents (configurable range).
 pub fn map_osc_detune(osc_id: crate::message::OscillatorId, normalized: f32) -> Message {
-    // Map 0.0-1.0 to -50 to +50 cents (centered at 0.5)
-    let cents = (normalized - 0.5) * 100.0;
+    // Map 0.0-1.0 to -DETUNE_RANGE_CENTS to +DETUNE_RANGE_CENTS (centered at 0.5)
+    // Adjust DETUNE_RANGE_CENTS in config.rs for different detune intensities
+    let cents = (normalized - 0.5) * (DETUNE_RANGE_CENTS * 2.0);
     Message::SetOscDetune(osc_id, cents)
+}
+
+/// Map normalized value (0.0-1.0) to filter cutoff frequency, exponentially.
+pub fn map_cutoff(normalized: f32) -> Message {
+    use micromath::F32Ext;
+    use crate::config::{FILTER_CUTOFF_MIN, FILTER_CUTOFF_MAX};
+
+    // Exponential mapping for musical frequency perception
+    // Uses config constants for min/max range (safe margin below Nyquist for filter stability)
+    let curved = normalized.powi(POT_EXPONENT_SCALE);
+    let freq = FILTER_CUTOFF_MIN * (FILTER_CUTOFF_MAX / FILTER_CUTOFF_MIN).powf(curved);
+    Message::SetCutoff(freq)
 }

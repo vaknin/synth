@@ -8,7 +8,7 @@ pub mod pot;
 pub mod task;
 
 // Re-export commonly used items
-pub use pot::{map_master_pitch, map_osc_level, map_osc_detune, Potentiometer};
+pub use pot::{map_cutoff, map_master_pitch, map_osc_detune, map_osc_level, Potentiometer};
 pub use task::pot_task;
 
 use crate::config::MESSAGE_QUEUE_SIZE;

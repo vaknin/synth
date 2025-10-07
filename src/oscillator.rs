@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use crate::config::{WAVETABLE_MASK, WAVETABLE_SIZE_F32};
+use crate::config::{DEFAULT_FREQUENCY, SAMPLE_RATE, WAVETABLE_MASK, WAVETABLE_SIZE_F32};
 use crate::slew::Slew;
 
 /// High-quality 1024-sample sine wave lookup table.
@@ -142,10 +142,43 @@ pub const SINE: [f32; 1024] = [
 pub enum Waveform {
     /// Pure sine wave (wavetable lookup with linear interpolation)
     Sine,
-    /// Sawtooth wave (direct computation: phase * 2.0 - 1.0)
+    /// Sawtooth wave (PolyBLEP anti-aliased)
     Saw,
-    /// Square wave (direct computation: phase < 0.5 ? 1.0 : -1.0)
+    /// Square wave (PolyBLEP anti-aliased)
     Square,
+}
+
+/// PolyBLEP (Polynomial Bandlimited Step) residual correction.
+///
+/// Smooths discontinuities to eliminate aliasing using 2nd-order polynomial.
+/// Simple arithmetic only - no transcendentals, optimal for ESP32-S3 FPU.
+///
+/// # Arguments
+/// * `phase` - Current phase position [0.0, 1.0)
+/// * `phase_inc` - Phase increment per sample (frequency / sample_rate)
+///
+/// # Returns
+/// Correction residual to subtract from naive waveform
+///
+/// Reference: Välimäki & Huovilainen (2007) "Antialiasing Oscillators"
+#[inline]
+fn poly_blep(phase: f32, phase_inc: f32) -> f32 {
+    // Forward discontinuity (0 < phase < phase_inc)
+    if phase < phase_inc {
+        let t = phase / phase_inc;
+        // Polynomial: 2t - t² - 1
+        t + t - t * t - 1.0
+    }
+    // Backward discontinuity (1 - phase_inc < phase < 1)
+    else if phase > 1.0 - phase_inc {
+        let t = (phase - 1.0) / phase_inc;
+        // Polynomial: t² + 2t + 1
+        t * t + t + t + 1.0
+    }
+    // No discontinuity nearby
+    else {
+        0.0
+    }
 }
 
 /// Multi-waveform oscillator with runtime waveform selection.
@@ -171,17 +204,17 @@ pub struct Oscillator {
 }
 
 impl Oscillator {
-    /// Create a new oscillator at the given frequency with specified waveform.
+    /// Create a new oscillator with specified waveform using default frequency and sample rate.
     ///
     /// # Arguments
-    /// * `frequency` - Frequency in Hz (e.g., 440.0 for A4)
-    /// * `sample_rate` - Sample rate in Hz (e.g., 44100.0)
     /// * `waveform` - Waveform type (Sine/Saw/Square)
     ///
     /// # Returns
-    /// Oscillator with level=DEFAULT_VOICE_VOLUME and detune_ratio=1.0 (no detune)
-    pub fn new(frequency: f32, sample_rate: f32, waveform: Waveform) -> Self {
-        use crate::config::DEFAULT_VOICE_VOLUME;
+    /// Oscillator with frequency=DEFAULT_FREQUENCY, sample_rate=SAMPLE_RATE,
+    /// level=DEFAULT_VOICE_VOLUME and detune_ratio=1.0 (no detune)
+    pub fn new(waveform: Waveform) -> Self {
+        let frequency = DEFAULT_FREQUENCY;
+        let sample_rate = SAMPLE_RATE as f32;
 
         // Phase increment normalized to [0.0, 1.0) per sample
         let phase_inc = frequency / sample_rate;
@@ -191,8 +224,8 @@ impl Oscillator {
             frequency,
             sample_rate,
             waveform,
-            level: Slew::new(DEFAULT_VOICE_VOLUME),  // Use config default
-            detune_ratio: 1.0,                        // No detune by default
+            level: Slew::new(0.0),  // Start silent - Engine will set active oscillator levels
+            detune_ratio: 1.0,      // No detune by default
         }
     }
 
@@ -243,8 +276,11 @@ impl Oscillator {
     /// Returns a scaled f32 value: waveform * level (typically -1.0 to 1.0 range).
     #[inline]
     pub fn tick(&mut self) -> f32 {
+        // Cache phase increment (critical: value() advances slew state, call only once)
+        let phase_inc = self.phase_increment.value();
+
         // Advance phase (normalized [0.0, 1.0) range)
-        self.phase += self.phase_increment.value();
+        self.phase += phase_inc;
 
         // Wrap phase to [0.0, 1.0) range
         if self.phase >= 1.0 {
@@ -267,21 +303,32 @@ impl Oscillator {
                 sample1 + (sample2 - sample1) * frac
             }
             Waveform::Saw => {
-                // Direct sawtooth computation (faster than table lookup)
-                // Scale [0.0, 1.0) to [-1.0, 1.0)
-                (self.phase * 2.0) - 1.0
+                // Naive sawtooth: ramp from -1 to +1
+                let naive = (self.phase * 2.0) - 1.0;
+
+                // Apply PolyBLEP correction at phase wrap (use cached phase_inc)
+                naive - poly_blep(self.phase, phase_inc)
             }
             Waveform::Square => {
-                // Direct square wave computation (branch predictor friendly)
-                if self.phase < 0.5 {
-                    1.0
+                // Naive square wave: -1 or +1
+                let naive = if self.phase < 0.5 { 1.0 } else { -1.0 };
+
+                // Square has 2 discontinuities per cycle: at 0.0 and 0.5
+                // Correction at phase wrap (0 → 1 transition)
+                let corrected = naive - poly_blep(self.phase, phase_inc);
+
+                // Correction at midpoint (0.5 transition, inverted polarity)
+                let phase_mid = if self.phase < 0.5 {
+                    self.phase + 0.5
                 } else {
-                    -1.0
-                }
+                    self.phase - 0.5
+                };
+                corrected + poly_blep(phase_mid, phase_inc)
             }
         };
 
-        // Apply level control (integrated, self-contained)
-        sample * self.level.value()
+        // DIAGNOSTIC: Bypass level smoothing - use target directly
+        // sample * self.level.value()
+        sample * self.level.target
     }
 }

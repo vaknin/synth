@@ -1,8 +1,10 @@
 //! Engine module: manages oscillators, processes messages, renders audio.
 
-use crate::config::{MASTER_GAIN, SAMPLE_RATE, DEFAULT_FREQUENCY};
+use crate::config::{DEFAULT_FREQUENCY, MASTER_GAIN};
+use crate::filter::StateVariableFilter;
 use crate::message::Message;
 use crate::oscillator::{Oscillator, Waveform};
+use crate::slew::Slew;
 use crate::{AudioStream, ChannelReceiver, I16_MAX_F32};
 
 /// Main synth engine managing direct oscillators (monophonic drone architecture).
@@ -16,6 +18,13 @@ pub struct Engine {
 
     /// Message receiver from control tasks
     consumer: ChannelReceiver,
+
+    /// Soft-start fade-in using Slew (0.0→1.0 over ~50ms, protects speakers/headphones)
+    /// Initialized with current=0.0, target=1.0, uses existing SMOOTHING_COEFF
+    soft_start_gain: Slew,
+
+    /// State Variable Filter (LP/HP/BP outputs)
+    filter: StateVariableFilter,
 }
 
 impl Engine {
@@ -33,13 +42,11 @@ impl Engine {
     pub fn new(receiver: ChannelReceiver) -> Self {
         use crate::config::DEFAULT_VOICE_VOLUME;
 
-        let sample_rate = SAMPLE_RATE as f32;
-        let base_freq = DEFAULT_FREQUENCY;
-
-        let mut osc1 = Oscillator::new(base_freq, sample_rate, Waveform::Sine);
-        let mut osc2 = Oscillator::new(base_freq, sample_rate, Waveform::Saw);
-        let mut osc3 = Oscillator::new(base_freq, sample_rate, Waveform::Square);
-        let mut sub = Oscillator::new(base_freq / 2.0, sample_rate, Waveform::Sine);
+        let mut osc1 = Oscillator::new(Waveform::Sine);
+        let mut osc2 = Oscillator::new(Waveform::Saw);
+        let mut osc3 = Oscillator::new(Waveform::Square);
+        let mut sub = Oscillator::new(Waveform::Sine);
+        sub.set_frequency(DEFAULT_FREQUENCY / 2.0);  // Sub oscillator at -1 octave
 
         // Only Osc1 active by default
         osc1.set_level(DEFAULT_VOICE_VOLUME);
@@ -51,10 +58,23 @@ impl Engine {
         let level_sum = DEFAULT_VOICE_VOLUME;
         let level_sum_reciprocal = 1.0 / level_sum;
 
+        // Soft-start gain: starts at 0.0, ramps to 1.0 over ~10ms
+        // Uses fast coefficient (0.99) for quick but smooth startup, preventing speaker pop
+        let mut soft_start_gain = Slew::with_coeff(0.0, 0.99);
+        soft_start_gain.set_target(1.0);
+
+        // Initialize filter with config defaults
+        let filter = StateVariableFilter::new(
+            crate::config::FILTER_CUTOFF_DEFAULT,
+            crate::config::FILTER_RESONANCE_DEFAULT,
+        );
+
         Self {
             oscillators: [osc1, osc2, osc3, sub],
             level_sum_reciprocal,
             consumer: receiver,
+            soft_start_gain,
+            filter,
         }
     }
 
@@ -109,17 +129,17 @@ impl Engine {
                     }
                 }
 
-                // === Phase 2: Filter Controls (stub for now) ===
-                Message::SetCutoff(_freq) => {
-                    // TODO: Implement in Phase 2
+                // === Phase 2: Filter Controls ===
+                Message::SetCutoff(freq) => {
+                    self.filter.set_cutoff(freq);
                 }
 
-                Message::SetResonance(_q) => {
-                    // TODO: Implement in Phase 2
+                Message::SetResonance(q) => {
+                    self.filter.set_resonance(q);
                 }
 
                 Message::SetFilterLevel(_filter_type, _level) => {
-                    // TODO: Implement in Phase 2
+                    // TODO: Implement filter blending in Phase 3
                 }
             }
         }
@@ -143,8 +163,20 @@ impl Engine {
                     .sum();
 
                 // Normalize by cached level sum reciprocal (fast multiply, not divide)
-                // Apply master gain and convert to i16
-                let sample = (mix * self.level_sum_reciprocal * MASTER_GAIN * I16_MAX_F32) as i16;
+                let normalized = mix * self.level_sum_reciprocal;
+
+                // Process through State Variable Filter (LP/HP/BP outputs)
+                let (lp, _hp, _bp) = self.filter.process(normalized);
+
+                // Use lowpass output only (Phase 2: LP-only)
+                let filtered = lp;
+
+                // DIAGNOSTIC: Bypass soft-start fade-in
+                // let fade_gain = self.soft_start_gain.value();
+                let fade_gain = 1.0;
+
+                // Apply soft-start, master gain, and convert to i16
+                let sample = (filtered * fade_gain * MASTER_GAIN * I16_MAX_F32) as i16;
                 let bytes = sample.to_le_bytes();
 
                 // Write stereo (duplicate mono to both channels)
