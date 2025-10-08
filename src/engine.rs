@@ -25,6 +25,18 @@ pub struct Engine {
 
     /// Moog Ladder Filter (4-pole lowpass with resonance)
     filter: MoogLadderFilter,
+
+    /// Profiling: accumulated statistics (only compiled with 'profile' feature)
+    #[cfg(feature = "profile")]
+    profile_stats: ProfileStats,
+}
+
+#[cfg(feature = "profile")]
+struct ProfileStats {
+    buffer_count: u32,
+    total_micros: u64,
+    min_micros_per_sample: u64,
+    max_micros_per_sample: u64,
 }
 
 impl Engine {
@@ -45,8 +57,9 @@ impl Engine {
                 Oscillator::new(Waveform::Saw),
                 Oscillator::new(Waveform::Square),
                 {
-                    let mut sub = Oscillator::new(Waveform::Sine);
-                    sub.set_frequency(FREQUENCY_MIN / 2.0); // Sub at -1 octave
+                    let mut sub = Oscillator::new(Waveform::Square);
+                    sub.set_frequency(FREQUENCY_MIN / 4.0); // Sub at -1 octave
+                    sub.set_level(0.5); // Full level (no pot control yet)
                     sub
                 },
             ],
@@ -63,6 +76,13 @@ impl Engine {
                 crate::config::FILTER_CUTOFF_MIN,
                 crate::config::FILTER_RESONANCE_MIN,
             ),
+            #[cfg(feature = "profile")]
+            profile_stats: ProfileStats {
+                buffer_count: 0,
+                total_micros: 0,
+                min_micros_per_sample: u64::MAX,
+                max_micros_per_sample: 0,
+            },
         }
     }
 
@@ -187,13 +207,13 @@ impl Engine {
     /// - AUDIO RATE (44.1kHz): Generate samples with audio-rate smoothing
     #[inline]
     async fn render(&mut self, audio_stream: &mut AudioStream) {
-        // DIAGNOSTIC: Measure cycles spent in audio generation
-        #[cfg(feature = "profile")]
-        let start = embassy_time::Instant::now();
-
         #[cfg_attr(not(feature = "profile"), allow(unused_variables))]
         let bytes_written = audio_stream
             .push_with(|buffer| {
+                // DIAGNOSTIC: Measure CPU time INSIDE push_with (excludes DMA waiting)
+                #[cfg(feature = "profile")]
+                let start = embassy_time::Instant::now();
+
                 if buffer.len() < 4 {
                     return 0;
                 }
@@ -221,23 +241,51 @@ impl Engine {
                     chunk[3] = bytes[1];
                 }
 
-                buffer.len() - (buffer.len() % 4)
+                let bytes_written = buffer.len() - (buffer.len() % 4);
+
+                // DIAGNOSTIC: Accumulate performance metrics (log only every ~1 second)
+                #[cfg(feature = "profile")]
+                {
+                    let elapsed = embassy_time::Instant::now() - start;
+                    let samples = bytes_written / 4;
+
+                    if samples > 0 {
+                        let micros_per_sample = elapsed.as_micros() / samples as u64;
+
+                        // Accumulate stats
+                        self.profile_stats.buffer_count += 1;
+                        self.profile_stats.total_micros += elapsed.as_micros();
+                        self.profile_stats.min_micros_per_sample =
+                            self.profile_stats.min_micros_per_sample.min(micros_per_sample);
+                        self.profile_stats.max_micros_per_sample =
+                            self.profile_stats.max_micros_per_sample.max(micros_per_sample);
+
+                        // Log every 172 buffers (~1 second at 44.1kHz with 256 samples/buffer)
+                        if self.profile_stats.buffer_count >= 172 {
+                            let avg_micros_per_sample =
+                                self.profile_stats.total_micros / (self.profile_stats.buffer_count as u64 * samples as u64);
+
+                            log::info!(
+                                "CPU: avg={} us/sample, min={} us/sample, max={} us/sample ({} buffers)",
+                                avg_micros_per_sample,
+                                self.profile_stats.min_micros_per_sample,
+                                self.profile_stats.max_micros_per_sample,
+                                self.profile_stats.buffer_count
+                            );
+
+                            // Reset stats
+                            self.profile_stats.buffer_count = 0;
+                            self.profile_stats.total_micros = 0;
+                            self.profile_stats.min_micros_per_sample = u64::MAX;
+                            self.profile_stats.max_micros_per_sample = 0;
+                        }
+                    }
+                }
+
+                bytes_written
             })
             .await
             .unwrap_or(0);
-
-        // DIAGNOSTIC: Log performance metrics
-        #[cfg(feature = "profile")]
-        {
-            let elapsed = embassy_time::Instant::now() - start;
-            let samples = bytes_written / 4;
-            log::info!(
-                "Rendered {} samples in {:?} ({} us/sample)",
-                samples,
-                elapsed,
-                elapsed.as_micros() / samples.max(1) as u64
-            );
-        }
     }
 
     /// Render audio into provided buffer.

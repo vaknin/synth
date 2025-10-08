@@ -52,7 +52,7 @@ pub const POLYBLEP_THRESHOLD_PHASE_INC: f32 = POLYBLEP_THRESHOLD_HZ / 44100.0;
 
 /// Master output gain applied after voice mixing (0.0 to 1.0).
 /// Provides headroom even when all voices are at max volume (0.95 ≈ -0.45 dB).
-pub const MASTER_GAIN: f32 = 0.85;
+pub const MASTER_GAIN: f32 = 0.75;
 
 // === Wavetable ===
 
@@ -130,6 +130,11 @@ pub const FREQUENCY_MAX: f32 = 768.0;
 /// Range: pot center = 0¢, pot min = -DETUNE_RANGE_CENTS, pot max = +DETUNE_RANGE_CENTS
 pub const DETUNE_RANGE_CENTS: f32 = 1200.0 * 2.0;
 
+/// Conversion factor from cents to octaves (1/1200).
+/// Used in cents-to-frequency-ratio formula: ratio = 2^(cents * CENTS_TO_OCTAVES)
+/// Pre-calculated to eliminate division in hot path (compiler optimization).
+pub const CENTS_TO_OCTAVES: f32 = 1.0 / 1200.0;
+
 // === Moog Ladder Filter ===
 
 /// Minimum cutoff frequency for Moog Ladder Filter (Hz).
@@ -141,7 +146,7 @@ pub const FILTER_CUTOFF_MIN: f32 = FREQUENCY_MIN * 6.0;
 /// Extended to 20 kHz to cover the full audible spectrum.
 /// Moog ladder uses tan-based warping with saturation, stable across entire range.
 /// At 20 kHz: g = tan(π × 20k/44.1k) ≈ 6.8, well within safe limits.
-pub const FILTER_CUTOFF_MAX: f32 = 18000.0;
+pub const FILTER_CUTOFF_MAX: f32 = 15000.0;
 
 /// Minimum filter resonance (dimensionless Q factor).
 /// 0.1 provides heavily damped filtering with no peak at cutoff.
@@ -151,4 +156,4 @@ pub const FILTER_RESONANCE_MIN: f32 = 0.1;
 /// 4.0 enables classic Moog self-oscillation - the "sweet spot" before harsh distortion.
 /// At k≈4.0, loop gain reaches unity and filter whistles musically.
 /// Higher values overdrive the feedback path, losing the characteristic Moog tone.
-pub const FILTER_RESONANCE_MAX: f32 = 1.25;
+pub const FILTER_RESONANCE_MAX: f32 = 2.0;
