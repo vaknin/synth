@@ -39,18 +39,23 @@ fn render_sample(&mut self) -> f32     // Mix → normalize → filter
 
 **Smoothing Decision Rules:**
 
-1. **Parameters that Multiply at Audio Rate** → **Use Slew (Audio Rate)**
-   - **Why**: Direct multiplication without smoothing causes zipper noise
+1. **Performance Parameters (Level, Pitch)** → **Use Slew (Audio Rate)**
+   - **Why**: Users expect immediate tactile response (~10ms), buffer-rate is too sluggish
    - **Examples**: Oscillator pitch, oscillator level, mix normalization factor
    - **Pattern**: Call `.value()` in audio-rate code (e.g., inside `tick()` or `render_sample()`)
-   - **Cost**: Minimal due to `settled` optimization (just branch check when stable)
+   - **Cost**: ~2-15 cycles per `.value()` call (settled optimization keeps it cheap 90% of time)
+   - **Critical**: With α=0.99 at 44.1kHz, settling time is ~10ms - perfect for performance control
 
-2. **Filter Coefficients** → **Use Slew with Fast Settling (Audio Rate)**
-   - **Why**: tan() nonlinearity amplifies small pot changes into large coefficient jumps, especially at high cutoff. ADC multisampling alone is insufficient.
-   - **Examples**: Filter g_norm, g_norm_inv, resonance feedback (k)
-   - **Pattern**: Buffer rate computes targets via tan() + dirty flag, audio rate smooths with Slew (α=0.95 for fast settling)
-   - **Cost**: Minimal - settled optimization keeps overhead low when static (~90% of time)
-   - **Critical**: Use α=0.95 (not default 0.99) - fast 2ms settling is essential to avoid CPU overload from prolonged smoothing
+2. **Filter Coefficients** → **Use Slew (Buffer Rate ONLY)**
+   - **Why**: Audio-rate smoothing causes CPU overload → crackling/pops even with α=0.95
+   - **Examples**: Filter g_norm, resonance feedback (k)
+   - **Pattern**:
+     - Buffer rate: Call `.value()` in `update_coefficients()` to advance Slew state
+     - Audio rate: Call `.current()` in `process()` for zero-cost reads
+   - **Cost**: Zero at audio rate (just field access)
+   - **Trade-off**: Sluggish control feel (~12ms lag with α=0.95 at 172Hz) but necessary for stability
+   - **CRITICAL**: DO NOT use audio-rate smoothing for filter coefficients - it WILL cause crackling
+   - **Tested**: Hybrid approach (tan at buffer rate, Slew at audio rate) still causes CPU starvation
 
 3. **Modulation Sources** → **Generate Smooth (No Slew)**
    - **Why**: LFOs/Envelopes produce smooth signals natively
@@ -62,9 +67,11 @@ fn render_sample(&mut self) -> f32     // Mix → normalize → filter
 ```
 Pots (50Hz) → [9× multisampling + deadband] → Messages → Targets
                                                             ↓
-Buffer Rate (172Hz): consume_messages() → Slew.set_target() or direct assignment
+Buffer Rate (172Hz): consume_messages() → Slew.set_target()
+                                       → Filter: update_coefficients() + .value()
                                                             ↓
-Audio Rate (44.1kHz): render_sample() → Slew.value() for smooth params
+Audio Rate (44.1kHz): render_sample() → Performance params: .value() (pitch, level)
+                                      → Filter coefficients: .current() (zero-cost)
 ```
 
 ## Critical Performance Considerations (ESP32-S3)

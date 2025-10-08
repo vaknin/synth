@@ -1,5 +1,5 @@
 use crate::config::{
-    DEFAULT_FREQUENCY, OSC_SILENCE_THRESHOLD, POLYBLEP_THRESHOLD_PHASE_INC, SAMPLE_RATE,
+    FREQUENCY_MIN, OSC_SILENCE_THRESHOLD, POLYBLEP_THRESHOLD_PHASE_INC, SAMPLE_RATE,
     WAVETABLE_MASK, WAVETABLE_SIZE_F32,
 };
 use crate::slew::Slew;
@@ -213,10 +213,10 @@ impl Oscillator {
     /// * `waveform` - Waveform type (Sine/Saw/Square)
     ///
     /// # Returns
-    /// Oscillator with frequency=DEFAULT_FREQUENCY, sample_rate=SAMPLE_RATE,
-    /// level=DEFAULT_VOICE_VOLUME and detune_ratio=1.0 (no detune)
+    /// Oscillator with frequency=FREQUENCY_MIN, sample_rate=SAMPLE_RATE,
+    /// level=0.0 (silent) and detune_ratio=1.0 (no detune)
     pub fn new(waveform: Waveform) -> Self {
-        let frequency = DEFAULT_FREQUENCY;
+        let frequency = FREQUENCY_MIN;
         let sample_rate = SAMPLE_RATE as f32;
 
         // Phase increment normalized to [0.0, 1.0) per sample
@@ -278,14 +278,16 @@ impl Oscillator {
     /// Kept for architectural consistency (future envelope/modulation hooks).
     #[inline]
     pub fn update_parameters(&mut self) {
-        // No-op: Both phase_increment and level smoothed at audio rate in tick()
-        // Audio rate (44.1kHz) with α=0.99 provides ~10ms response time
-        // Buffer rate (172Hz) would give 581ms - too sluggish for musical control
+        // No-op: Both level and pitch smoothed at audio rate for responsive control
+        // Buffer-rate smoothing (~172Hz) is too slow for musical parameters:
+        // - At 172Hz with α=0.99: ~2.5s settling time (unusable for muting!)
+        // - At 44.1kHz with α=0.99: ~10ms settling time (perfect for performance)
+        // Only filter coefficients benefit from buffer-rate smoothing.
     }
 
     /// Generate the next sample with integrated level control.
     ///
-    /// Both frequency and level smoothed at audio rate for responsive, zipper-free control.
+    /// Both level and pitch smoothed at audio rate for responsive, zipper-free control.
     /// Returns a scaled f32 value: waveform * level (typically -1.0 to 1.0 range).
     #[inline]
     pub fn tick(&mut self) -> f32 {

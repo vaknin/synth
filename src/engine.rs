@@ -1,6 +1,6 @@
 //! Engine module: manages oscillators, processes messages, renders audio.
 
-use crate::config::{DEFAULT_FREQUENCY, MASTER_GAIN};
+use crate::config::{FREQUENCY_MIN, MASTER_GAIN};
 use crate::filter::MoogLadderFilter;
 use crate::message::Message;
 use crate::oscillator::{Oscillator, Waveform};
@@ -34,7 +34,7 @@ impl Engine {
     /// * `receiver` - Embassy channel receiver for control messages
     ///
     /// # Returns
-    /// Engine with oscillators at DEFAULT_FREQUENCY, all silent (level=0.0).
+    /// Engine with oscillators at FREQUENCY_MIN, all silent (level=0.0).
     /// Pot messages arrive within ~20ms and Slew smooths to actual positions.
     pub fn new(receiver: ChannelReceiver) -> Self {
         Self {
@@ -46,7 +46,7 @@ impl Engine {
                 Oscillator::new(Waveform::Square),
                 {
                     let mut sub = Oscillator::new(Waveform::Sine);
-                    sub.set_frequency(DEFAULT_FREQUENCY / 2.0); // Sub at -1 octave
+                    sub.set_frequency(FREQUENCY_MIN / 2.0); // Sub at -1 octave
                     sub
                 },
             ],
@@ -60,8 +60,8 @@ impl Engine {
                 gain
             },
             filter: MoogLadderFilter::new(
-                crate::config::FILTER_CUTOFF_DEFAULT,
-                crate::config::FILTER_RESONANCE_DEFAULT,
+                crate::config::FILTER_CUTOFF_MIN,
+                crate::config::FILTER_RESONANCE_MIN,
             ),
         }
     }
@@ -147,31 +147,30 @@ impl Engine {
     /// that don't need audio-rate smoothing. Future: LFO/envelope modulation.
     #[inline]
     fn update_buffer_parameters(&mut self) {
-        // Oscillator parameters: Currently no-op (freq/level smoothed at audio rate)
-        // Future: LFO/envelope modulation will update Slew targets here
+        // Oscillator parameters: No-op (level/pitch smoothed at audio rate for responsiveness)
         for osc in &mut self.oscillators {
             osc.update_parameters();
         }
 
-        // Filter coefficients: Only recalc if parameters changed (dirty flag optimization)
+        // Filter coefficients: OPTIMIZED - smoothed at buffer rate (only parameter that works well here)
         self.filter.update_coefficients();
     }
 
     /// AUDIO RATE (44,100 Hz): Render one audio sample - SUPER HOT PATH!
     ///
-    /// Called for every sample in the buffer. Performs all audio-rate smoothing:
-    /// - Oscillator tick() smooths frequency and level via Slew
-    /// - Normalization uses audio-rate Slew to prevent zipper noise
-    /// - Filter processes with cached coefficients (updated at buffer rate)
+    /// OPTIMIZED: Filter coefficients cached at buffer rate, performance params at audio rate.
+    /// - Oscillator tick() smooths pitch & level at audio rate (responsive control)
+    /// - Normalization smoothed at audio rate (settled optimization keeps it cheap)
+    /// - Filter processes with cached coefficients (ONLY param smoothed at buffer rate)
     ///
     /// # Returns
     /// Filtered mono sample (before master gain and soft-start)
     #[inline]
     fn render_sample(&mut self) -> f32 {
-        // Sum all oscillators (tick() smooths both freq & level at audio rate)
+        // Sum all oscillators (tick() smooths both pitch & level at audio rate)
         let mix: f32 = self.oscillators.iter_mut().map(|osc| osc.tick()).sum();
 
-        // Normalize by sum of oscillator levels (smoothed at audio rate to prevent zipper)
+        // Normalize by sum of oscillator levels (smoothed at audio rate, cheap when settled)
         let normalized = mix * self.level_sum_reciprocal.value();
 
         // Process through Moog Ladder Filter (lowpass only, cached coefficients)

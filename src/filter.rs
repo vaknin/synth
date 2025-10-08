@@ -26,6 +26,8 @@ pub struct MoogLadderFilter {
     sample_rate: f32,
     /// Smoothed g_norm (audio-rate, fast settling for responsive control)
     g_norm_slew: Slew,
+    /// Cached g_inv (1.0 - g_norm), updated at buffer rate for zero-cost audio-rate reads
+    g_inv_cached: f32,
     /// Smoothed k (audio-rate, fast settling)
     k_slew: Slew,
     /// Whether coefficients need recalculation (dirty flag optimization)
@@ -53,6 +55,7 @@ impl MoogLadderFilter {
 
         // Normalize g for stable one-pole integration
         let g_norm = g / (1.0 + g);
+        let g_inv = 1.0 - g_norm;
 
         // Resonance compensation for stability (Huovilainen model)
         let k = clamped_resonance * 4.0 * (1.0 - g_norm);
@@ -65,6 +68,7 @@ impl MoogLadderFilter {
             // Fast-settling Slew (α=0.95) for responsive yet smooth coefficient changes
             // Settles in ~2ms vs 10ms for default 0.99 - critical for CPU efficiency
             g_norm_slew: Slew::with_coeff(g_norm, 0.95),
+            g_inv_cached: g_inv,
             k_slew: Slew::with_coeff(k, 0.95),
             dirty: false, // Coefficients already calculated
         }
@@ -107,6 +111,8 @@ impl MoogLadderFilter {
             // Even when not dirty, advance Slew state at buffer rate
             self.g_norm_slew.value();
             self.k_slew.value();
+            // Update cached g_inv (Slew might still be settling from previous change)
+            self.g_inv_cached = 1.0 - self.g_norm_slew.current();
             return;
         }
 
@@ -130,6 +136,9 @@ impl MoogLadderFilter {
         self.g_norm_slew.value();
         self.k_slew.value();
 
+        // Update cached g_inv (computed once per buffer, read 256× per buffer at audio rate)
+        self.g_inv_cached = 1.0 - self.g_norm_slew.current();
+
         // Clear dirty flag (coefficients now up to date)
         self.dirty = false;
     }
@@ -151,11 +160,8 @@ impl MoogLadderFilter {
     #[inline(always)]
     pub fn process(&mut self, input: f32) -> f32 {
         // OPTIMIZED: Zero-cost coefficient reads (smoothed at buffer rate in update_coefficients)
-        // OLD (per-sample smoothing, expensive):
-        // let g_norm = self.g_norm_slew.value();
-        // let k = self.k_slew.value();
         let g_norm = self.g_norm_slew.current();
-        let g_inv = 1.0 - g_norm; // Computed directly - 1 cycle vs 8-14 cycles for Slew call
+        let g_inv = self.g_inv_cached; // Zero-cost cached read (computed once per buffer, not per sample)
         let k = self.k_slew.current();
 
         // Feedback from output with hard clamp (prevents runaway oscillation)

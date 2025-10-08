@@ -24,11 +24,6 @@ pub const SMOOTHING_COEFF: f32 = 0.99;
 /// Optimization: Skips EMA computation when settled (parameters are static 90%+ of the time).
 pub const SLEW_SETTLE_THRESHOLD: f32 = 1.0 / 32768.0;
 
-// === Voice Defaults ===
-
-/// Starting frequency for all voices on initialization (Hz).
-pub const DEFAULT_FREQUENCY: f32 = 77.0;
-
 // === Output Level Management ===
 
 /// Minimum level in decibels for metering and UI.
@@ -148,11 +143,6 @@ pub const FILTER_CUTOFF_MIN: f32 = FREQUENCY_MIN * 6.0;
 /// At 20 kHz: g = tan(π × 20k/44.1k) ≈ 6.8, well within safe limits.
 pub const FILTER_CUTOFF_MAX: f32 = 18000.0;
 
-/// Default filter cutoff on initialization (Hz).
-/// 1 kHz provides balanced starting point - covers osc fundamental range (30-1024 Hz)
-/// while leaving room to sweep both darker and brighter. Musical sweet spot.
-pub const FILTER_CUTOFF_DEFAULT: f32 = 1000.0;
-
 /// Minimum filter resonance (dimensionless Q factor).
 /// 0.1 provides heavily damped filtering with no peak at cutoff.
 pub const FILTER_RESONANCE_MIN: f32 = 0.1;
@@ -161,8 +151,4 @@ pub const FILTER_RESONANCE_MIN: f32 = 0.1;
 /// 4.0 enables classic Moog self-oscillation - the "sweet spot" before harsh distortion.
 /// At k≈4.0, loop gain reaches unity and filter whistles musically.
 /// Higher values overdrive the feedback path, losing the characteristic Moog tone.
-pub const FILTER_RESONANCE_MAX: f32 = 2.0;
-
-/// Default filter resonance on initialization (dimensionless Q factor).
-/// 0.7 provides gentle resonance without excessive peaking or ringing.
-pub const FILTER_RESONANCE_DEFAULT: f32 = 0.7;
+pub const FILTER_RESONANCE_MAX: f32 = 1.25;
