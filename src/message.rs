@@ -13,17 +13,6 @@ pub enum OscillatorId {
     Sub = 3,
 }
 
-/// Filter type identifier for multimode filter control.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum FilterType {
-    /// Lowpass filter output
-    Lowpass = 0,
-    /// Highpass filter output
-    Highpass = 1,
-    /// Bandpass filter output
-    Bandpass = 2,
-}
-
 /// Messages sent from control tasks (buttons, pots, encoders) to audio task.
 #[derive(Debug, Clone, Copy)]
 pub enum Message {
@@ -41,12 +30,9 @@ pub enum Message {
 
     // === Phase 2: Filter Controls ===
 
-    /// Set filter cutoff frequency (normalized 0.0-1.0)
+    /// Set filter cutoff frequency (Hz, mapped from pot)
     SetCutoff(f32),
 
-    /// Set filter resonance/Q (normalized 0.0-1.0)
+    /// Set filter resonance (0.0-10.0, mapped from pot)
     SetResonance(f32),
-
-    /// Set output level for specific filter type (0.0-1.0)
-    SetFilterLevel(FilterType, f32),
 }

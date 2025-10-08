@@ -123,35 +123,28 @@ pub const DETUNE_RANGE_CENTS: f32 = 100.0;
 pub const POT_RESONANCE_MIN: f32 = 0.3;
 
 /// Maximum resonance value from pot (musical range, not safety clamp).
-/// 8.0 enables dramatic self-oscillation for tonal effects and drone synthesis.
-/// Exponential mapping keeps lower range usable while providing drama at high end.
-pub const POT_RESONANCE_MAX: f32 = 8.0;
+/// 10.0 enables extreme self-oscillation for tonal effects and drone synthesis.
+/// Feedback saturation ensures stability even at maximum resonance.
+/// Linear mapping gives predictable response across pot travel.
+pub const POT_RESONANCE_MAX: f32 = 10.0;
 
-// === State Variable Filter ===
+// === Moog Ladder Filter ===
 
-/// Minimum cutoff frequency for State Variable Filter (Hz).
-/// 60 Hz provides musical low-end filtering without over-darkening.
-/// Can still remove fundamentals (osc range: 30-1024 Hz) for subtractive textures.
-/// Previous 20 Hz was too extreme - compressed useful pot range into top 80% of travel.
-pub const FILTER_CUTOFF_MIN: f32 = 60.0;
+/// Minimum cutoff frequency for Moog Ladder Filter (Hz).
+/// 20 Hz reaches sub-bass territory for extreme filtering effects.
+/// Moog ladder handles the full audible spectrum with no stability constraints.
+pub const FILTER_CUTOFF_MIN: f32 = 20.0;
 
-/// Chamberlin SVF stability margin (must be < 1.0 for stable operation).
-/// The coefficient f = 2π × fc/fs must stay below 1.0. Using 0.95 provides 5% safety margin
-/// to prevent runaway oscillation at maximum cutoff while still reaching ~6668Hz.
-pub const FILTER_STABILITY_MARGIN: f32 = 0.95;
-
-/// Maximum cutoff frequency for State Variable Filter (Hz).
-/// Derived from Chamberlin SVF stability: f < 1.0, where f = 2π × fc / fs
-/// With stability margin: fc_max = (fs / 2π) × 0.95 ≈ 6668Hz @ 44.1kHz
-/// Theoretical limit is 7019Hz, but margin prevents instability at pot maximum.
-pub const FILTER_CUTOFF_MAX: f32 =
-    SAMPLE_RATE as f32 / (2.0 * core::f32::consts::PI) * FILTER_STABILITY_MARGIN;
+/// Maximum cutoff frequency for Moog Ladder Filter (Hz).
+/// Extended to 20 kHz to cover the full audible spectrum.
+/// Moog ladder uses tan-based warping with saturation, stable across entire range.
+/// At 20 kHz: g = tan(π × 20k/44.1k) ≈ 6.8, well within safe limits.
+pub const FILTER_CUTOFF_MAX: f32 = 20000.0;
 
 /// Default filter cutoff on initialization (Hz).
-/// 2 kHz provides balanced starting point - high enough for harmonic clarity,
-/// low enough for warmth. User can sweep in both directions from this sweet spot.
-/// Previous default (MAX) was too bright and gave no indication filter was working.
-pub const FILTER_CUTOFF_DEFAULT: f32 = 2000.0;
+/// 1 kHz provides balanced starting point - covers osc fundamental range (30-1024 Hz)
+/// while leaving room to sweep both darker and brighter. Musical sweet spot.
+pub const FILTER_CUTOFF_DEFAULT: f32 = 1000.0;
 
 /// Minimum filter resonance (dimensionless Q factor).
 /// 0.1 provides heavily damped filtering with no peak at cutoff.
@@ -165,7 +158,3 @@ pub const FILTER_RESONANCE_MAX: f32 = 10.0;
 /// 0.7 provides gentle resonance without excessive peaking or ringing.
 pub const FILTER_RESONANCE_DEFAULT: f32 = 0.7;
 
-/// Filter integrator state limit (dimensionless, ±full scale amplitude).
-/// Prevents unbounded growth of lowpass/bandpass integrator states at high resonance.
-/// ±5.0 allows up to 5× amplification beyond normalized ±1.0 input (headroom for resonance peaks).
-pub const FILTER_INTEGRATOR_LIMIT: f32 = 5.0;

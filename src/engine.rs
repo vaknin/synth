@@ -1,7 +1,7 @@
 //! Engine module: manages oscillators, processes messages, renders audio.
 
 use crate::config::{DEFAULT_FREQUENCY, MASTER_GAIN};
-use crate::filter::StateVariableFilter;
+use crate::filter::MoogLadderFilter;
 use crate::message::Message;
 use crate::oscillator::{Oscillator, Waveform};
 use crate::slew::Slew;
@@ -23,8 +23,8 @@ pub struct Engine {
     /// Initialized with current=0.0, target=1.0, uses existing SMOOTHING_COEFF
     soft_start_gain: Slew,
 
-    /// State Variable Filter (LP/HP/BP outputs)
-    filter: StateVariableFilter,
+    /// Moog Ladder Filter (4-pole lowpass with resonance)
+    filter: MoogLadderFilter,
 }
 
 impl Engine {
@@ -59,7 +59,7 @@ impl Engine {
                 gain.set_target(1.0);
                 gain
             },
-            filter: StateVariableFilter::new(
+            filter: MoogLadderFilter::new(
                 crate::config::FILTER_CUTOFF_DEFAULT,
                 crate::config::FILTER_RESONANCE_DEFAULT,
             ),
@@ -137,10 +137,6 @@ impl Engine {
                 Message::SetResonance(q) => {
                     self.filter.set_resonance(q);
                 }
-
-                Message::SetFilterLevel(_filter_type, _level) => {
-                    // TODO: Implement filter blending in Phase 3
-                }
             }
         }
     }
@@ -178,18 +174,18 @@ impl Engine {
         // Normalize by sum of oscillator levels (smoothed at audio rate to prevent zipper)
         let normalized = mix * self.level_sum_reciprocal.value();
 
-        // Process through State Variable Filter (lowpass output, cached coefficients)
-        let (lp, _hp, _bp) = self.filter.process(normalized);
+        // Process through Moog Ladder Filter (lowpass only, cached coefficients)
+        let filtered = self.filter.process(normalized);
 
         // Debug: Detect NaN/Inf and warn (indicates filter instability)
         #[cfg(debug_assertions)]
-        if !lp.is_finite() {
+        if !filtered.is_finite() {
             log::error!("Filter output is NaN/Inf! cutoff={}, resonance={}",
                        self.filter.cutoff, self.filter.resonance);
             return 0.0;
         }
 
-        lp
+        filtered
     }
 
     /// Render audio samples into the DMA buffer.

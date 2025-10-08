@@ -25,20 +25,17 @@ enum Control {
     Osc3Detune = 5,
     Cutoff = 6,
     Resonance = 7,
-    LpLevel = 8,
-    HpLevel = 9,
-    BpLevel = 10,
-    FilterLfoRate = 11,
-    FilterLfoDepth = 12,
-    PitchLfoRate = 13,
-    PitchLfoDepth = 14,
-    DelayTime = 15,
-    DelayFeedback = 16,
-    ReverbMix = 17,
-    Drive = 18,
-    SubLevel = 19,
-    NoiseLevel = 20,
-    Volume = 21,
+    FilterLfoRate = 8,
+    FilterLfoDepth = 9,
+    PitchLfoRate = 10,
+    PitchLfoDepth = 11,
+    DelayTime = 12,
+    DelayFeedback = 13,
+    ReverbMix = 14,
+    Drive = 15,
+    SubLevel = 16,
+    NoiseLevel = 17,
+    Volume = 18,
 }
 
 // ❌ WRONG - Hardcoded indices require refactoring later
@@ -123,10 +120,6 @@ pub enum OscillatorId {
     Osc1 = 0, Osc2 = 1, Osc3 = 2, Sub = 3,
 }
 
-pub enum FilterType {
-    Lowpass = 0, Highpass = 1, Bandpass = 2,
-}
-
 pub enum Message {
     // Phase 1: Oscillator Controls
     SetMasterPitch(f32),                    // Absolute Hz
@@ -134,9 +127,8 @@ pub enum Message {
     SetOscDetune(OscillatorId, f32),        // Cents (converted internally)
 
     // Phase 2: Filter Controls
-    SetCutoff(f32),                         // Normalized 0.0-1.0
-    SetResonance(f32),                      // Normalized 0.0-1.0
-    SetFilterLevel(FilterType, f32),        // Reuses enum for 3 filter outputs
+    SetCutoff(f32),                         // Hz (60-6668Hz exponential)
+    SetResonance(f32),                      // 0.0-10.0 (Moog ladder resonance)
 }
 ```
 
@@ -308,8 +300,7 @@ async fn render(&mut self, audio_stream: &mut AudioStream) {
   - `Message::SetOscLevel(OscillatorId, f32)` - reuses enum, not separate variants
   - `Message::SetOscDetune(OscillatorId, f32)` - cents (converted internally)
 - ✅ `OscillatorId` enum (Osc1/Osc2/Osc3/Sub) for type-safe routing
-- ✅ `FilterType` enum (Lowpass/Highpass/Bandpass) for Phase 2 prep
-- ✅ Phase 2 filter message stubs (SetCutoff/SetResonance/SetFilterLevel)
+- ✅ Phase 2 filter message stubs (SetCutoff/SetResonance)
 
 **Control Mapping:**
 - ✅ `map_master_pitch()`: normalized → 30-1024Hz exponential
@@ -344,16 +335,14 @@ async fn render(&mut self, audio_stream: &mut AudioStream) {
 ## Phase 2: Filter & Effects Implementation
 
 **Status**: 🔄 **IN PROGRESS** (Filter implemented and optimized, Effects pending)
-**Goal**: Complete signal chain with State Variable Filter (LP-only) and saturation (add 4 pots: Cutoff, Resonance, Drive, Volume)
+**Goal**: Complete signal chain with Moog Ladder Filter and saturation (add 4 pots: Cutoff, Resonance, Drive, Volume)
 
-**Filter Implementation (LP-Only):**
-- ✅ Implement State Variable Filter (LP/HP/BP simultaneous outputs, use LP only)
+**Filter Implementation:**
+- ✅ Implement Moog Ladder Filter (4-pole lowpass with resonance feedback)
 - ✅ **Performance optimization**: Coefficient caching (only recalculate when parameters change)
-- ✅ **Stability fix**: Cutoff range corrected to `fs/(2π)` ≈ 7019 Hz (Chamberlin constraint f ≤ 1.0)
-- 🔄 Add Cutoff pot control with exponential mapping (20Hz - 7kHz) - **GPIO5 ready, testing**
-- [ ] Add Resonance pot control (0.0 - 1.2, enable self-oscillation)
-- ✅ Test filter stability at extreme resonance values (mathematically proven stable)
-- [ ] Filter blend controls (LpLevel/HpLevel/BpLevel) deferred to Phase 3/4
+- ✅ **Stability**: Unconditional stability at all cutoff/resonance combinations (no Chamberlin f<1.0 constraint)
+- ✅ Add Cutoff pot control with exponential mapping (60Hz - 6.7kHz)
+- ✅ Add Resonance pot control (0.3 - 8.0, dramatic self-oscillation at high end)
 
 **Effects & Finalization:**
 - [ ] Implement Drive/saturation (soft clipping waveshaper)
@@ -379,9 +368,8 @@ async fn render(&mut self, audio_stream: &mut AudioStream) {
 
 **DSP Quality Improvements:**
 - [ ] Add PolyBLEP anti-aliasing to sawtooth/square oscillators
-- [ ] Add filter blend controls (LpLevel/HpLevel/BpLevel pots)
-- [ ] Test filter mode blending at various Cutoff/Resonance settings
 - [ ] Verify no aliasing artifacts in high-frequency sweeps
+- [ ] Test filter response at extreme cutoff/resonance settings
 
 **Performance Profiling:**
 - ✅ Profile audio callback CPU usage - **Identified Slew and filter as bottlenecks**
@@ -410,7 +398,6 @@ async fn render(&mut self, audio_stream: &mut AudioStream) {
 - [ ] Implement Filter Cutoff LFO (sine wave, 0.01-20Hz rate + depth controls)
 - [ ] Implement Pitch LFO (sine wave, 0.01-20Hz rate + depth controls)
 - [ ] Add noise generator with level control
-- [ ] Add filter mode blend (LP/HP/BP mix controls)
 
 **Time-Based Effects:**
 - [ ] Implement Delay using PSRAM buffer (time: 50ms-5sec, feedback: 0-110%)
@@ -425,8 +412,8 @@ async fn render(&mut self, audio_stream: &mut AudioStream) {
 - [ ] Optimize SPI refresh rate for 30+ FPS without audio glitches
 
 **Control Expansion:**
-- [ ] Wire additional ADS1115 modules for remaining 11 pots (controls 12-22)
-- [ ] Map remaining pots: LP/HP/BP Levels, Filter LFO Rate/Depth, Pitch LFO Rate/Depth, Delay Time/Feedback, Reverb Mix, Noise Level
+- [ ] Wire additional ADS1115 modules for remaining pots (controls 8-18)
+- [ ] Map remaining pots: Filter LFO Rate/Depth, Pitch LFO Rate/Depth, Delay Time/Feedback, Reverb Mix, Drive, Sub Level, Noise Level, Volume
 
 **Decision Point**: Only pursue if Phase 1-3 delivers satisfying core drone synthesis
 
@@ -479,18 +466,19 @@ async fn render(&mut self, audio_stream: &mut AudioStream) {
 - ✅ 16-bit audio @ 44.1kHz with 5.8ms latency (1024-byte DMA buffer)
 
 ### Phase 2 (Filter/Effects - Add 4 Pots) Complete When:
-- ✅ State Variable Filter (LP mode) shapes tone musically
+- ✅ Moog Ladder Filter shapes tone musically with classic analog character
 - ✅ Cutoff and Resonance controls respond smoothly
+- ✅ Self-oscillation at high resonance creates additional tonal voice
 - ✅ Drive/saturation adds warmth without harshness
 - ✅ Master volume control provides proper output scaling
-- ✅ Full signal chain OSC→Filter(LP)→Drive→Output sounds professional
+- ✅ Full signal chain OSC→Moog Filter→Drive→Output sounds professional
 - ✅ All 11 pots wired and functional
 - ✅ Can create evolving drone textures continuously
 - ✅ 16-bit audio @ 44.1kHz with 5.8ms latency (1024-byte buffer)
 
 ### Phase 3 (Performance Optimization) Complete When:
 - ✅ PolyBLEP anti-aliasing eliminates harsh aliasing artifacts
-- ✅ Filter blend controls (LpLevel/HpLevel/BpLevel) enable unique timbres
+- ✅ Filter stable at all cutoff/resonance combinations (no crashes or NaN)
 - ✅ Audio callback uses <95% CPU utilization
 - ✅ Zero audio glitches during continuous 10+ minute operation
 - ✅ ADC scan completes in <25ms for all wired pots
@@ -502,8 +490,7 @@ async fn render(&mut self, audio_stream: &mut AudioStream) {
 - ✅ Filter Cutoff LFO and Pitch LFO add musical movement
 - ✅ Delay and Reverb create spatial depth
 - ✅ Noise generator adds organic texture
-- ✅ Filter mode blending (LP/HP/BP) enables unique timbres
-- ✅ All 22 controls wired and functional
+- ✅ All ~19 controls wired and functional
 - ✅ Real-time oscilloscope waveform renders at 30+ FPS
 - ✅ Display updates don't interfere with audio rendering
 
@@ -543,8 +530,8 @@ async fn render(&mut self, audio_stream: &mut AudioStream) {
 - **Phase 4:** Upgrade to 24-bit if needed for effects/final polish
 
 **Phase Scope Refinements**:
-- **Phase 2:** LP-only filter (blend controls deferred)
-- **Phase 3:** Add PolyBLEP + filter blend (LpLevel/HpLevel/BpLevel)
+- **Phase 2:** Moog Ladder lowpass filter (classic analog sound)
+- **Phase 3:** Add PolyBLEP anti-aliasing to oscillators
 - **Phase 4:** Optional extended features (LFOs, effects, display)
 
 **Next Action**: Begin architecture refactor on `monophony` branch
