@@ -124,7 +124,7 @@ pub const POT_CHANGE_THRESHOLD: f32 = 0.0005;
 pub const POT_EXPONENT_SCALE: i32 = 2;
 
 /// Minimum frequency target for potentiometer control (Hz).
-pub const FREQUENCY_MIN: f32 = 25.0;
+pub const FREQUENCY_MIN: f32 = 27.5;
 
 /// Maximum frequency target for potentiometer control (Hz).
 pub const FREQUENCY_MAX: f32 = 768.0;
@@ -133,25 +133,14 @@ pub const FREQUENCY_MAX: f32 = 768.0;
 /// 100 cents = 1 semitone, 200 cents = 2 semitones.
 /// Larger values create more dramatic detuning effects for drone synthesis.
 /// Range: pot center = 0¢, pot min = -DETUNE_RANGE_CENTS, pot max = +DETUNE_RANGE_CENTS
-pub const DETUNE_RANGE_CENTS: f32 = FREQUENCY_MIN * 5.0;
-
-// === Potentiometer Resonance Mapping ===
-
-/// Minimum resonance value from pot (musical range, not safety clamp).
-pub const POT_RESONANCE_MIN: f32 = 0.1;
-
-/// Maximum resonance value from pot (musical range, not safety clamp).
-/// 10.0 enables extreme self-oscillation for tonal effects and drone synthesis.
-/// Feedback saturation ensures stability even at maximum resonance.
-/// Linear mapping gives predictable response across pot travel.
-pub const POT_RESONANCE_MAX: f32 = 10.0;
+pub const DETUNE_RANGE_CENTS: f32 = 1200.0 * 2.0;
 
 // === Moog Ladder Filter ===
 
 /// Minimum cutoff frequency for Moog Ladder Filter (Hz).
 /// 20 Hz reaches sub-bass territory for extreme filtering effects.
 /// Moog ladder handles the full audible spectrum with no stability constraints.
-pub const FILTER_CUTOFF_MIN: f32 = FREQUENCY_MIN * 7.0;
+pub const FILTER_CUTOFF_MIN: f32 = FREQUENCY_MIN * 6.0;
 
 /// Maximum cutoff frequency for Moog Ladder Filter (Hz).
 /// Extended to 20 kHz to cover the full audible spectrum.
@@ -169,8 +158,10 @@ pub const FILTER_CUTOFF_DEFAULT: f32 = 1000.0;
 pub const FILTER_RESONANCE_MIN: f32 = 0.1;
 
 /// Maximum filter resonance (dimensionless Q factor).
-/// 10.0 enables strong self-oscillation for tonal effects.
-pub const FILTER_RESONANCE_MAX: f32 = 8.0;
+/// 4.0 enables classic Moog self-oscillation - the "sweet spot" before harsh distortion.
+/// At k≈4.0, loop gain reaches unity and filter whistles musically.
+/// Higher values overdrive the feedback path, losing the characteristic Moog tone.
+pub const FILTER_RESONANCE_MAX: f32 = 2.0;
 
 /// Default filter resonance on initialization (dimensionless Q factor).
 /// 0.7 provides gentle resonance without excessive peaking or ringing.

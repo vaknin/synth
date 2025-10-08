@@ -3,6 +3,7 @@ use crate::config::{
     WAVETABLE_MASK, WAVETABLE_SIZE_F32,
 };
 use crate::slew::Slew;
+use micromath::F32Ext;
 
 /// High-quality 1024-sample sine wave lookup table.
 /// Values are normalized to the range -1.0 to 1.0 for clean DSP processing.
@@ -265,8 +266,6 @@ impl Oscillator {
     /// Converts cents to frequency ratio: ratio = 2^(cents/1200)
     /// Uses micromath for fast embedded computation.
     pub fn set_detune_cents(&mut self, cents: f32) {
-        use micromath::F32Ext;
-
         // Convert cents to frequency ratio: ratio = 2^(cents/1200)
         // 0 cents → ratio 1.0, +1200 cents → ratio 2.0 (one octave up)
         self.detune_ratio = 2.0_f32.powf(cents / 1200.0);

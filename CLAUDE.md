@@ -45,11 +45,12 @@ fn render_sample(&mut self) -> f32     // Mix → normalize → filter
    - **Pattern**: Call `.value()` in audio-rate code (e.g., inside `tick()` or `render_sample()`)
    - **Cost**: Minimal due to `settled` optimization (just branch check when stable)
 
-2. **Filter Parameters** → **Direct (No Slew)**
-   - **Why**: ADC multisampling (9×) provides sufficient smoothing. Dirty flag prevents redundant recalc.
-   - **Examples**: Filter cutoff, filter resonance
-   - **Pattern**: Direct assignment + dirty flag, coefficients cached at buffer rate
-   - **Cost**: Zero smoothing overhead
+2. **Filter Coefficients** → **Use Slew with Fast Settling (Audio Rate)**
+   - **Why**: tan() nonlinearity amplifies small pot changes into large coefficient jumps, especially at high cutoff. ADC multisampling alone is insufficient.
+   - **Examples**: Filter g_norm, g_norm_inv, resonance feedback (k)
+   - **Pattern**: Buffer rate computes targets via tan() + dirty flag, audio rate smooths with Slew (α=0.95 for fast settling)
+   - **Cost**: Minimal - settled optimization keeps overhead low when static (~90% of time)
+   - **Critical**: Use α=0.95 (not default 0.99) - fast 2ms settling is essential to avoid CPU overload from prolonged smoothing
 
 3. **Modulation Sources** → **Generate Smooth (No Slew)**
    - **Why**: LFOs/Envelopes produce smooth signals natively
@@ -65,3 +66,21 @@ Buffer Rate (172Hz): consume_messages() → Slew.set_target() or direct assignme
                                                             ↓
 Audio Rate (44.1kHz): render_sample() → Slew.value() for smooth params
 ```
+
+## Critical Performance Considerations (ESP32-S3)
+
+**Division Operations are Extremely Expensive:**
+- Division: 10-40 cycles per operation
+- Multiplication: 1-2 cycles per operation
+- **Strategy**: Pre-calculate reciprocals, use multiplication instead of division in hot paths
+- **Example**: PolyBLEP uses `phase * phase_inc_reciprocal` instead of `phase / phase_inc`
+
+**Early Exit Optimizations:**
+- Silent oscillators (level < OSC_SILENCE_THRESHOLD) skip waveform generation entirely
+- PolyBLEP anti-aliasing skipped below 1000 Hz (POLYBLEP_THRESHOLD_HZ) where aliasing is inaudible
+- These optimizations prevent CPU starvation and buffer underruns (crackling/pops)
+
+**Filter Saturation:**
+- Use hard clamp `fb.clamp(-1.0, 1.0)` for feedback, NOT division-based saturation
+- Rational functions like `x / (1 + x²)` are too expensive for 44.1kHz audio rate
+- Hard clamp is 2-3 cycles vs 10-40 cycles for division

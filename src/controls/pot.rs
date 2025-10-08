@@ -6,6 +6,90 @@ use crate::message::Message;
 use log::warn;
 use micromath::F32Ext;
 
+// === Curve System: Elegant, composable parameter mapping ===
+
+/// Input response curve applied to normalized pot value (0.0-1.0).
+/// Shapes how pot movement translates to parameter changes.
+#[derive(Debug, Clone, Copy)]
+pub enum Curve {
+    /// Linear response: y = x (direct 1:1 mapping)
+    Linear,
+    /// Power law: y = x^n (using POT_EXPONENT_SCALE from config)
+    /// Compresses low end, spreads high end - perceptual scaling
+    Power,
+    /// Quadratic with sign preservation: y = sign(x-0.5) × (x-0.5)²
+    /// Slow near center (0.5), fast at edges - ideal for detune!
+    Quadratic,
+    /// Cubic: y = (x-0.5)³
+    /// Even slower near center - for subtle modulation depth control
+    Cubic,
+}
+
+/// Output range mapping strategy.
+/// Defines how the curved input maps to the final parameter value.
+#[derive(Debug, Clone, Copy)]
+pub enum Range {
+    /// Linear interpolation: min + (max - min) × curved_value
+    /// Equal spacing across range
+    Linear { min: f32, max: f32 },
+    /// Geometric scaling: min × (max/min)^curved_value
+    /// Equal spacing across octaves/decades - perfect for pitch!
+    Geometric { min: f32, max: f32 },
+    /// Bipolar/centered: maps 0.0-1.0 to -range to +range
+    /// Input 0.5 → 0.0 (center), useful for detune, pan, modulation
+    Bipolar { range: f32 },
+}
+
+impl Curve {
+    /// Apply curve to normalized input (0.0-1.0).
+    #[inline]
+    fn apply(self, normalized: f32) -> f32 {
+        match self {
+            Curve::Linear => normalized,
+            Curve::Power => normalized.powi(POT_EXPONENT_SCALE),
+            Curve::Quadratic => {
+                // Center at 0.5, apply quadratic, preserve sign for bipolar ranges
+                let centered = normalized - 0.5; // -0.5 to +0.5
+                let sign = centered.signum();
+                let abs_curved = (centered.abs() * 2.0).powi(2) / 2.0; // 0.0 to 0.5
+                sign * abs_curved + 0.5 // Map back to 0.0-1.0
+            }
+            Curve::Cubic => {
+                // Cubic naturally preserves sign
+                let centered = normalized - 0.5; // -0.5 to +0.5
+                (centered * 2.0).powi(3) / 2.0 + 0.5 // Map back to 0.0-1.0
+            }
+        }
+    }
+}
+
+impl Range {
+    /// Map curved value to output range.
+    #[inline]
+    fn map(self, curved: f32) -> f32 {
+        match self {
+            Range::Linear { min, max } => min + (max - min) * curved,
+            // Use micromath for embedded-optimized powf (no std dependency)
+            Range::Geometric { min, max } => min * (max / min).powf(curved),
+            Range::Bipolar { range } => (curved - 0.5) * (range * 2.0),
+        }
+    }
+}
+
+/// Generic parameter mapper: curve + range composition.
+///
+/// Separates concerns:
+/// - Curve: shapes input response (how pot feels)
+/// - Range: maps to output domain (parameter value)
+///
+/// This eliminates code duplication - frequency mappings all use Geometric range,
+/// but can have different input curves for different perceptual goals.
+#[inline]
+pub fn map_range(normalized: f32, curve: Curve, range: Range) -> f32 {
+    let curved = curve.apply(normalized);
+    range.map(curved)
+}
+
 /// Potentiometer with filtering, deadband, and parameter mapping.
 ///
 /// Each pot owns its own signal processing state (deadband, multisampling),
@@ -89,47 +173,82 @@ impl Potentiometer {
     }
 }
 
-// === Phase 1: Oscillator Control Mappings ===
+// === Parameter Mapping Functions ===
+// Each function specifies its curve + range for clear, maintainable behavior.
 
-/// Map normalized value (0.0-1.0) to master pitch frequency (30Hz-1024Hz), logarithmically.
+/// Map normalized value (0.0-1.0) to master pitch frequency.
+///
+/// Uses Power + Linear: compresses low frequencies, spreads high frequencies.
+/// Gives more pot travel to the upper range for precise tuning.
 pub fn map_master_pitch(normalized: f32) -> Message {
-    let curved = normalized.powi(POT_EXPONENT_SCALE);
-    let freq = FREQUENCY_MIN + (FREQUENCY_MAX - FREQUENCY_MIN) * curved;
+    let freq = map_range(
+        normalized,
+        Curve::Power,
+        Range::Linear {
+            min: FREQUENCY_MIN,
+            max: FREQUENCY_MAX,
+        },
+    );
     Message::SetMasterPitch(freq)
 }
 
 /// Map normalized value (0.0-1.0) to oscillator level.
+///
+/// Uses Power + Linear for logarithmic amplitude response.
+/// Matches human hearing perception - feels smooth and even across pot travel.
 pub fn map_osc_level(osc_id: crate::message::OscillatorId, normalized: f32) -> Message {
-    Message::SetOscLevel(osc_id, normalized)
+    let level = map_range(normalized, Curve::Power, Range::Linear { min: 0.0, max: 1.0 });
+    Message::SetOscLevel(osc_id, level)
 }
 
-/// Map normalized value (0.0-1.0) to detune in cents (configurable range).
+/// Map normalized value (0.0-1.0) to detune in cents.
+///
+/// Uses Quadratic + Bipolar for fine control near center (0¢),
+/// fast changes at edges (±DETUNE_RANGE_CENTS).
+/// Perfect for dialing in subtle beating effects!
 pub fn map_osc_detune(osc_id: crate::message::OscillatorId, normalized: f32) -> Message {
-    // Map 0.0-1.0 to -DETUNE_RANGE_CENTS to +DETUNE_RANGE_CENTS (centered at 0.5)
-    // Adjust DETUNE_RANGE_CENTS in config.rs for different detune intensities
-    let cents = (normalized - 0.5) * (DETUNE_RANGE_CENTS * 2.0);
+    let cents = map_range(
+        normalized,
+        Curve::Quadratic,
+        Range::Bipolar {
+            range: DETUNE_RANGE_CENTS,
+        },
+    );
     Message::SetOscDetune(osc_id, cents)
 }
 
-/// Map normalized value (0.0-1.0) to filter cutoff frequency, exponentially.
+/// Map normalized value (0.0-1.0) to filter cutoff frequency.
+///
+/// Uses Power + Geometric for perceptually even octave spacing.
+/// Each pot rotation covers similar musical intervals across the entire range.
 pub fn map_cutoff(normalized: f32) -> Message {
     use crate::config::{FILTER_CUTOFF_MAX, FILTER_CUTOFF_MIN};
-    use micromath::F32Ext;
 
-    // Exponential mapping for musical frequency perception
-    // Uses config constants for min/max range (safe margin below Nyquist for filter stability)
-    let curved = normalized.powi(POT_EXPONENT_SCALE);
-    let freq = FILTER_CUTOFF_MIN * (FILTER_CUTOFF_MAX / FILTER_CUTOFF_MIN).powf(curved);
+    let freq = map_range(
+        normalized,
+        Curve::Power,
+        Range::Geometric {
+            min: FILTER_CUTOFF_MIN,
+            max: FILTER_CUTOFF_MAX,
+        },
+    );
     Message::SetCutoff(freq)
 }
 
 /// Map normalized value (0.0-1.0) to filter resonance.
 ///
-/// Uses config constants for musical range (POT_RESONANCE_MIN to POT_RESONANCE_MAX).
-/// Filter's internal clamping (FILTER_RESONANCE_MIN/MAX) provides safety bounds.
+/// Uses Linear + Linear for simple, predictable response.
+/// Resonance (Q factor) is already perceptually uniform.
 pub fn map_resonance(normalized: f32) -> Message {
-    use crate::config::{POT_RESONANCE_MAX, POT_RESONANCE_MIN};
+    use crate::config::{FILTER_RESONANCE_MAX, FILTER_RESONANCE_MIN};
 
-    let resonance = POT_RESONANCE_MIN + (POT_RESONANCE_MAX - POT_RESONANCE_MIN) * normalized;
+    let resonance = map_range(
+        normalized,
+        Curve::Linear,
+        Range::Linear {
+            min: FILTER_RESONANCE_MIN,
+            max: FILTER_RESONANCE_MAX,
+        },
+    );
     Message::SetResonance(resonance)
 }

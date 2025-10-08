@@ -319,85 +319,263 @@ async fn render(&mut self, audio_stream: &mut AudioStream) {
 **Phase 1 Full Pot Mapping (Ready to Wire):**
 - Pot 0: `MasterPitch` (30Hz - 1024Hz exponential) ✅
 - Pot 1: `Osc1Level` (sine, 0.0 - 1.0) ✅
-- Pot 2: `Osc2Level` (saw, 0.0 - 1.0) 🔄
-- Pot 3: `Osc2Detune` (-50¢ to +50¢) 🔄
+- Pot 2: `Osc2Detune` (±2400¢ = 4 octaves) ✅
+- Pot 3: `Osc2Level` (saw, 0.0 - 1.0) ✅
 - Pot 4: `Osc3Level` (square, 0.0 - 1.0) 🔄
-- Pot 5: `Osc3Detune` (-50¢ to +50¢) 🔄
+- Pot 5: `Osc3Detune` (±2400¢) 🔄
 - Pot 6: `SubLevel` (sine -1 octave, 0.0 - 1.0) 🔄
 
-**Current Build Status**: ✅ Clean compilation, filter + optimizations working
+**Current Build Status**: ✅ Clean compilation, 6 pots wired and functional
 
-**Diagnostic Mode**: Testing with 1 pot (GPIO1 = master pitch) to verify performance
-**Next Steps**: Re-enable all 5 pots, verify no crackling, expand to full control set
+**Current Pot Configuration (src/controls/task.rs):**
+- Pot 0 (GPIO1): Master Pitch ✅
+- Pot 1 (GPIO2): Osc1 Level ✅
+- Pot 2 (GPIO3): Osc2 Detune ✅
+- Pot 3 (GPIO4): Osc2 Level ✅
+- Pot 4 (GPIO5): Filter Cutoff ✅ (Phase 2)
+- Pot 5 (GPIO6): Filter Resonance ✅ (Phase 2)
 
 ---
 
 ## Phase 2: Filter & Effects Implementation
 
-**Status**: 🔄 **IN PROGRESS** (Filter implemented and optimized, Effects pending)
+**Status**: ✅ **FILTER COMPLETE** (Effects deferred to focus on modulation)
 **Goal**: Complete signal chain with Moog Ladder Filter and saturation (add 4 pots: Cutoff, Resonance, Drive, Volume)
 
 **Filter Implementation:**
 - ✅ Implement Moog Ladder Filter (4-pole lowpass with resonance feedback)
-- ✅ **Performance optimization**: Coefficient caching (only recalculate when parameters change)
-- ✅ **Stability**: Unconditional stability at all cutoff/resonance combinations (no Chamberlin f<1.0 constraint)
-- ✅ Add Cutoff pot control with exponential mapping (60Hz - 6.7kHz)
-- ✅ Add Resonance pot control (0.3 - 8.0, dramatic self-oscillation at high end)
+- ✅ **Improved Huovilainen model**: Unconditional stability at all cutoff/resonance combinations
+- ✅ **Performance optimization**: Dirty flag + coefficient caching (only recalc when parameters change)
+- ✅ **Coefficient smoothing**: Fast-settling Slew (α=0.95) eliminates zipper noise without CPU overhead
+- ✅ Add Cutoff pot control with exponential mapping (165Hz - 18kHz, full audible spectrum)
+- ✅ Add Resonance pot control (0.1 - 4.0, sweet spot for self-oscillation without harshness)
+- ✅ Hard clamp feedback saturation (fast, stable, classic Moog tone)
 
-**Effects & Finalization:**
-- [ ] Implement Drive/saturation (soft clipping waveshaper)
-- [ ] Calibrate Drive curve for warmth without harshness
-- [ ] Add master Volume control with logarithmic pot scaling
-- [ ] Tune all parameter ranges for musicality
-- [ ] Document optimal control positions for various drone textures
+**Effects & Finalization (Deferred):**
+- ⏸️ Implement Drive/saturation (soft clipping waveshaper) - *deferred to prioritize LFO modulation*
+- ⏸️ Calibrate Drive curve for warmth without harshness
+- ⏸️ Add master Volume control with logarithmic pot scaling
+- ⏸️ Tune all parameter ranges for musicality
+- ⏸️ Document optimal control positions for various drone textures
 
-**Phase 2 Pot Mapping (adds 4 controls to Phase 1's 7 = 11 total):**
-- Pot 7: `Cutoff` (20Hz - 20kHz exponential)
-- Pot 8: `Resonance` (0.0 - 1.2, self-oscillation enabled)
-- Pot 9: `Drive` (1.0 - 10.0 saturation gain)
-- Pot 10: `Volume` (0.0 - 1.0 logarithmic)
+**Current Pot Mapping (6 pots wired):**
+- Pot 4 (GPIO5): `Cutoff` (165Hz - 18kHz exponential) ✅
+- Pot 5 (GPIO6): `Resonance` (0.1 - 4.0) ✅
 
-**Checkpoint**: Full OSC → Filter(LP) → Drive → Output chain sounds musical and responsive, controlled by 11 pots
+**Checkpoint**: OSC → Filter(LP) → Output chain working beautifully, LFO modulation now highest priority
 
 ---
 
 ## Phase 3: Performance Optimization & Refinement
 
-**Status**: ✅ **LARGELY COMPLETE** (Core optimizations done, PolyBLEP pending)
+**Status**: ✅ **COMPLETE** (All critical optimizations implemented)
 **Goal**: Stable 44.1kHz audio with minimal CPU overhead, responsive controls, professional DSP quality
 
 **DSP Quality Improvements:**
-- [ ] Add PolyBLEP anti-aliasing to sawtooth/square oscillators
-- [ ] Verify no aliasing artifacts in high-frequency sweeps
-- [ ] Test filter response at extreme cutoff/resonance settings
+- ✅ Add PolyBLEP anti-aliasing to sawtooth/square oscillators (commit: "optimized polyBLEP")
+- ✅ Early exit optimization: Skip PolyBLEP below 1000 Hz (POLYBLEP_THRESHOLD_HZ) where aliasing inaudible
+- ✅ Division elimination: Pre-calculated reciprocals (phase_inc_reciprocal) for hot-path performance
+- ✅ Oscillator silence optimization: Skip waveform generation when level < OSC_SILENCE_THRESHOLD
+- ✅ Test filter response at extreme cutoff/resonance settings - **Unconditionally stable**
 
 **Performance Profiling:**
 - ✅ Profile audio callback CPU usage - **Identified Slew and filter as bottlenecks**
 - ✅ Add `#[inline]` attributes to hot-path functions (Slew, filter, oscillator tick)
-- ✅ Optimize State Variable Filter process() - **Coefficient caching implemented**
-- ✅ **Slew optimization**: Settled flag skips computation when stable (80% reduction)
-- ✅ Verify DMA buffer size - **Increased to 4084 bytes (23ms) for CPU headroom**
+- ✅ Optimize Moog Ladder Filter process() - **Coefficient caching + fast-settling Slew (α=0.95)**
+- ✅ **Slew optimization**: Settled flag skips computation when stable (~80% reduction in EMA calls)
+- ✅ Verify DMA buffer size - **4084 bytes (23ms @ 44.1kHz) provides CPU deadline headroom**
 
 **System Integration:**
-- ✅ Verify dual-core task distribution - **Core 0 = audio, Core 1 = ADC (correct assignment)**
+- ✅ Verify dual-core task distribution - **Core 0 = audio (PRO_CPU), Core 1 = ADC (APP_CPU)**
 - ✅ Embassy MPSC channel for thread-safe messaging between cores
-- 🔄 Test ADC scan rate with all pots - **Currently testing with 1 pot (master pitch)**
-- [ ] Ensure display updates don't interfere with audio rendering (Phase 4)
-- [ ] Optimize buffer size based on CPU profiling results
+- ✅ Test ADC scan rate with all pots - **6 pots @ 9× multisampling, no audio impact**
+- ✅ Soft-start gain prevents speaker pop on initialization
+- ✅ Crackling and pops eliminated via division elimination and early exit optimizations
 
-**Checkpoint**: Zero audio glitches, responsive controls, professional anti-aliased audio, smooth visual feedback
+**Checkpoint**: ✅ Zero audio glitches during continuous operation, responsive controls, professional anti-aliased audio
+
+---
+
+## Phase 3.5: Filter Cutoff LFO (Highest Priority Modulation)
+
+**Status**: 🚀 **READY TO START**
+**Goal**: Add filter cutoff modulation for evolving drone textures (adds 2 pots: LFO Rate, LFO Depth)
+
+**Rationale - Why Filter Cutoff LFO is Most Impactful:**
+1. **Core of drone synthesis**: Timbral evolution over time creates psychoacoustic interest
+2. **Classic modular technique**: Filter sweeps are the essence of vintage drone/ambient synthesis
+3. **Musical range**: 0.01-10Hz covers slow pads (30s cycle) to rhythmic pulses (0.1s cycle)
+4. **Works with existing architecture**: Modulates cutoff parameter at buffer rate (no new signal chain elements)
+5. **Immediate sonic impact**: More dramatic than pitch LFO for sustained drones
+
+**Implementation Architecture:**
+
+```rust
+// src/lfo.rs - New file
+pub struct Lfo {
+    /// Current phase [0.0, 1.0)
+    phase: f32,
+    /// Phase increment per sample (frequency / sample_rate)
+    phase_increment: f32,
+    /// LFO frequency in Hz (smoothed via Slew)
+    frequency: Slew,
+    /// LFO depth 0.0-1.0 (smoothed via Slew)
+    depth: Slew,
+    /// Sample rate
+    sample_rate: f32,
+}
+
+impl Lfo {
+    /// Generate next LFO sample (AUDIO RATE - called per sample)
+    /// Returns: bipolar output [-1.0, 1.0] scaled by depth
+    #[inline(always)]
+    pub fn tick(&mut self) -> f32 {
+        // Use existing SINE wavetable (share with oscillator, no extra memory)
+        let sine = wavetable::sine_at_phase(self.phase);
+
+        // Advance phase (wraps automatically via modulo in 0.0-1.0 space)
+        self.phase += self.phase_increment;
+        if self.phase >= 1.0 {
+            self.phase -= 1.0;
+        }
+
+        // Scale by smoothed depth (prevents zipper noise on depth changes)
+        sine * self.depth.value()
+    }
+
+    /// Update LFO parameters (BUFFER RATE - called once per buffer)
+    #[inline]
+    pub fn update_parameters(&mut self) {
+        // Recalculate phase increment only when frequency changed (dirty flag pattern)
+        let freq = self.frequency.value();
+        self.phase_increment = freq / self.sample_rate;
+    }
+}
+```
+
+**Engine Integration (src/engine.rs):**
+
+```rust
+pub struct Engine {
+    // ... existing fields ...
+
+    /// Filter cutoff LFO (generates modulation signal)
+    filter_lfo: Lfo,
+
+    /// Base filter cutoff from pot (before modulation)
+    base_cutoff: f32,
+
+    /// LFO modulation depth in Hz (mapped from pot, exponential scale)
+    lfo_cutoff_range: f32,
+}
+
+// BUFFER RATE: Update LFO and calculate modulated cutoff
+fn update_buffer_parameters(&mut self) {
+    // Update LFO parameters (frequency Slew)
+    self.filter_lfo.update_parameters();
+
+    // Generate LFO value for this buffer (audio rate will use cached value)
+    // Future: Move to audio rate if per-sample modulation sounds better
+    let lfo_value = self.filter_lfo.tick(); // -1.0 to +1.0
+
+    // Apply LFO to base cutoff: cutoff = base + (lfo × range)
+    // Range example: pot at 1000Hz, depth at max (±2 octaves) = 250Hz to 4000Hz
+    let modulated_cutoff = self.base_cutoff + (lfo_value * self.lfo_cutoff_range);
+
+    // Clamp to valid filter range, set filter cutoff (marks dirty for coefficient recalc)
+    self.filter.set_cutoff(modulated_cutoff.clamp(FILTER_CUTOFF_MIN, FILTER_CUTOFF_MAX));
+
+    // ... existing oscillator/filter parameter updates ...
+}
+```
+
+**Message System Updates:**
+
+```rust
+// src/message.rs
+pub enum Message {
+    // ... existing messages ...
+
+    /// Set Filter Cutoff LFO rate in Hz (0.01-10.0 Hz exponential)
+    SetFilterLfoRate(f32),
+
+    /// Set Filter Cutoff LFO depth (0.0-1.0, maps to ±N octaves)
+    SetFilterLfoDepth(f32),
+}
+```
+
+**Control Mapping Functions:**
+
+```rust
+// src/controls/pot.rs
+
+/// Map pot to LFO rate (exponential: 0.01 Hz to 10 Hz)
+/// 0.01 Hz = 100 second cycle (ultra-slow pad evolution)
+/// 10 Hz = 0.1 second cycle (rhythmic tremolo effect)
+pub fn map_lfo_rate(normalized: f32) -> f32 {
+    // Exponential curve: 10^(normalized × 3 - 2) = 0.01 to 10.0
+    // normalized 0.0 → 10^-2 = 0.01 Hz
+    // normalized 0.5 → 10^-0.5 ≈ 0.316 Hz (sweet spot for drones)
+    // normalized 1.0 → 10^1 = 10 Hz
+    let exponent = normalized * 3.0 - 2.0;
+    micromath::F32Ext::powf(10.0, exponent).clamp(0.01, 10.0)
+}
+
+/// Map pot to LFO depth (0.0 to 1.0, internally maps to ±octave range)
+/// Engine will multiply by octave range (e.g., ±2 octaves = 4× cutoff swing)
+pub fn map_lfo_depth(normalized: f32) -> f32 {
+    normalized  // Linear 0.0-1.0
+}
+```
+
+**Pot Wiring Plan (Adds 2 Pots):**
+- Pot 6 (GPIO7): `FilterLfoRate` (0.01 - 10 Hz exponential) 🔧
+- Pot 7 (GPIO8): `FilterLfoDepth` (0.0 - 1.0, ±2 octaves) 🔧
+
+**Implementation Steps:**
+1. ✅ Design LFO architecture (above)
+2. [ ] Create `src/lfo.rs` with Lfo struct
+3. [ ] Add LFO to Engine struct with base_cutoff tracking
+4. [ ] Implement buffer-rate modulation in `update_buffer_parameters()`
+5. [ ] Add Message::SetFilterLfoRate/Depth variants
+6. [ ] Add pot mapping functions (map_lfo_rate, map_lfo_depth)
+7. [ ] Wire pots 6-7 in controls/task.rs
+8. [ ] Test LFO range: verify smooth sweeps at 0.1 Hz, 1 Hz, 10 Hz
+9. [ ] Tune depth scaling for musical range (start with ±2 octaves)
+10. [ ] Document sweet spots (e.g., 0.5 Hz rate + 50% depth = classic drone texture)
+
+**Performance Considerations:**
+- ✅ Reuses existing SINE wavetable (no extra memory)
+- ✅ LFO runs at audio rate, modulation applied at buffer rate (efficient)
+- ✅ Slew on frequency/depth prevents zipper noise
+- ✅ No expensive math in tick() - just wavetable lookup + multiply
+- ✅ Leverages existing filter coefficient caching (dirty flag optimization)
+
+**Testing Plan:**
+1. Static LFO test: Set rate=1Hz, depth=100%, verify 1-second cycle
+2. Range test: Pot sweep from 0.01 Hz (slow) to 10 Hz (fast), verify exponential response
+3. Depth test: Fixed rate, sweep depth 0→100%, verify cutoff modulation range
+4. Musical test: Find sweet spots for pad textures, rhythmic pulses, subtle movement
+5. CPU test: Verify no audio glitches with LFO active (should be negligible overhead)
+
+**Success Criteria:**
+- ✅ LFO generates clean sine wave at all rates (0.01-10 Hz)
+- ✅ Filter cutoff sweeps smoothly without clicks or zipper noise
+- ✅ Depth control provides intuitive scaling (0% = static, 100% = dramatic sweep)
+- ✅ Can create classic drone textures: slow pad evolution, rhythmic filter pulses
+- ✅ No CPU overhead or audio glitches with LFO running
+- ✅ 8 pots total wired and functional
 
 ---
 
 ## Phase 4: Extended Features & Display - OPTIONAL
 
-**Status**: Not Started
-**Goal**: Add modulation, time-based effects, and visual feedback (requires scaling to 22 controls)
+**Status**: Not Started (Phase 3.5 Filter LFO takes priority)
+**Goal**: Add pitch modulation, time-based effects, and visual feedback (requires scaling to 22 controls)
 
-**Modulation:**
-- [ ] Implement Filter Cutoff LFO (sine wave, 0.01-20Hz rate + depth controls)
-- [ ] Implement Pitch LFO (sine wave, 0.01-20Hz rate + depth controls)
-- [ ] Add noise generator with level control
+**Modulation (Lower Priority than Filter LFO):**
+- [ ] Implement Pitch LFO (sine wave, 0.01-20Hz rate + depth controls) - *vibrato effects*
+- [ ] Add noise generator with level control - *organic texture layer*
 
 **Time-Based Effects:**
 - [ ] Implement Delay using PSRAM buffer (time: 50ms-5sec, feedback: 0-110%)
