@@ -29,9 +29,6 @@ pub const SLEW_SETTLE_THRESHOLD: f32 = 1.0 / 32768.0;
 /// Starting frequency for all voices on initialization (Hz).
 pub const DEFAULT_FREQUENCY: f32 = 77.0;
 
-/// Default volume level for voices (0.0 to 1.0).
-pub const DEFAULT_VOICE_VOLUME: f32 = 0.3;
-
 // === Output Level Management ===
 
 /// Minimum level in decibels for metering and UI.
@@ -42,7 +39,7 @@ pub const MAX_DB: f32 = 0.0;
 
 /// Master output gain applied after voice mixing (0.0 to 1.0).
 /// Provides headroom even when all voices are at max volume (0.95 ≈ -0.45 dB).
-pub const MASTER_GAIN: f32 = 0.01;
+pub const MASTER_GAIN: f32 = 0.95;
 
 // === Wavetable ===
 
@@ -119,11 +116,24 @@ pub const FREQUENCY_MAX: f32 = 1024.0;
 /// Range: pot center = 0¢, pot min = -DETUNE_RANGE_CENTS, pot max = +DETUNE_RANGE_CENTS
 pub const DETUNE_RANGE_CENTS: f32 = 100.0;
 
+// === Potentiometer Resonance Mapping ===
+
+/// Minimum resonance value from pot (musical range, not safety clamp).
+/// 0.3 provides subtle filtering with minimal resonant peak.
+pub const POT_RESONANCE_MIN: f32 = 0.3;
+
+/// Maximum resonance value from pot (musical range, not safety clamp).
+/// 8.0 enables dramatic self-oscillation for tonal effects and drone synthesis.
+/// Exponential mapping keeps lower range usable while providing drama at high end.
+pub const POT_RESONANCE_MAX: f32 = 8.0;
+
 // === State Variable Filter ===
 
 /// Minimum cutoff frequency for State Variable Filter (Hz).
-/// 20Hz is below the threshold of human hearing (useful for removing DC offset).
-pub const FILTER_CUTOFF_MIN: f32 = 20.0;
+/// 60 Hz provides musical low-end filtering without over-darkening.
+/// Can still remove fundamentals (osc range: 30-1024 Hz) for subtractive textures.
+/// Previous 20 Hz was too extreme - compressed useful pot range into top 80% of travel.
+pub const FILTER_CUTOFF_MIN: f32 = 60.0;
 
 /// Chamberlin SVF stability margin (must be < 1.0 for stable operation).
 /// The coefficient f = 2π × fc/fs must stay below 1.0. Using 0.95 provides 5% safety margin
@@ -138,13 +148,21 @@ pub const FILTER_CUTOFF_MAX: f32 =
     SAMPLE_RATE as f32 / (2.0 * core::f32::consts::PI) * FILTER_STABILITY_MARGIN;
 
 /// Default filter cutoff on initialization (Hz).
-/// Set to maximum (wide open) so filter doesn't attenuate audio until pot is adjusted.
-/// This prevents silence if GPIO5 pot starts at minimum position.
-pub const FILTER_CUTOFF_DEFAULT: f32 = FILTER_CUTOFF_MAX;
+/// 2 kHz provides balanced starting point - high enough for harmonic clarity,
+/// low enough for warmth. User can sweep in both directions from this sweet spot.
+/// Previous default (MAX) was too bright and gave no indication filter was working.
+pub const FILTER_CUTOFF_DEFAULT: f32 = 2000.0;
+
+/// Minimum filter resonance (dimensionless Q factor).
+/// 0.1 provides heavily damped filtering with no peak at cutoff.
+pub const FILTER_RESONANCE_MIN: f32 = 0.1;
+
+/// Maximum filter resonance (dimensionless Q factor).
+/// 10.0 enables strong self-oscillation for tonal effects.
+pub const FILTER_RESONANCE_MAX: f32 = 10.0;
 
 /// Default filter resonance on initialization (dimensionless Q factor).
 /// 0.7 provides gentle resonance without excessive peaking or ringing.
-/// Range: 0.1 (heavily damped) to 10.0 (self-oscillation).
 pub const FILTER_RESONANCE_DEFAULT: f32 = 0.7;
 
 /// Filter integrator state limit (dimensionless, ±full scale amplitude).

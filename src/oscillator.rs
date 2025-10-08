@@ -271,23 +271,23 @@ impl Oscillator {
 
     /// Update smoothed parameters (call once per buffer, not per sample).
     ///
-    /// Advances phase_increment and level Slew states.
-    /// Call this before the sample loop, then use tick() at audio rate.
+    /// Currently a no-op - both frequency and level smoothed at audio rate in tick().
+    /// Kept for architectural consistency (future envelope/modulation hooks).
     #[inline]
     pub fn update_parameters(&mut self) {
-        // Advance smoothing (buffer rate!)
-        self.phase_increment.value();
-        self.level.value();
+        // No-op: Both phase_increment and level smoothed at audio rate in tick()
+        // Audio rate (44.1kHz) with α=0.99 provides ~10ms response time
+        // Buffer rate (172Hz) would give 581ms - too sluggish for musical control
     }
 
     /// Generate the next sample with integrated level control.
     ///
-    /// Uses cached parameter values - call update_parameters() once per buffer first.
+    /// Both frequency and level smoothed at audio rate for responsive, zipper-free control.
     /// Returns a scaled f32 value: waveform * level (typically -1.0 to 1.0 range).
     #[inline]
     pub fn tick(&mut self) -> f32 {
-        // Use cached phase increment (no smoothing, no branching!)
-        let phase_inc = self.phase_increment.current();
+        // Smooth frequency at audio rate (~10ms response, settled optimization makes it cheap)
+        let phase_inc = self.phase_increment.value();
 
         // Advance phase (normalized [0.0, 1.0) range)
         self.phase += phase_inc;
@@ -337,7 +337,8 @@ impl Oscillator {
             }
         };
 
-        // Apply cached level (no smoothing!)
-        sample * self.level.current()
+        // Apply level with audio-rate smoothing (prevents zipper noise on volume changes)
+        // The settled optimization makes this cheap: just a branch check when stable
+        sample * self.level.value()
     }
 }

@@ -68,12 +68,12 @@ impl Potentiometer {
         let sum: u32 = self.samples.iter().map(|&s| s as u32).sum();
         let avg = (sum / self.samples.len() as u32) as f32;
 
-        // 3. EMA filtering for additional smoothing
-        // EXPERIMENTAL: Commented out to test single-stage smoothing (Slew only)
-        // Multisampling (9×) + Slew (buffer rate) should be sufficient
-        // If readings are jittery, re-enable this line
-        // self.filtered = self.filtered * self.alpha + avg * (1.0 - self.alpha);
-        self.filtered = avg; // Direct use of averaged value
+        // 3. Single-stage smoothing: multisampling only (no EMA)
+        // Oscillator params: Multisampling (9×) → Slew (audio rate 44.1kHz) for zipper prevention
+        // Filter params: Multisampling (9×) → Direct (no Slew, coefficients cached at buffer rate)
+        // If electrical noise is audible, re-enable EMA by uncommenting line below
+        self.filtered = self.filtered * self.alpha + avg * (1.0 - self.alpha);
+        // self.filtered = avg; // Direct use of averaged value
 
         // 4. Normalize to 0.0-1.0 range using calibrated min/max, defensive clamping
         let normalized = (self.filtered / (POT_MAX as f32)).clamp(0.0, 1.0);
@@ -123,14 +123,13 @@ pub fn map_cutoff(normalized: f32) -> Message {
     Message::SetCutoff(freq)
 }
 
-/// Map normalized value (0.0-1.0) to filter resonance (0.1-1.2).
+/// Map normalized value (0.0-1.0) to filter resonance.
 ///
-/// Range allows gentle filtering at minimum, self-oscillation at maximum.
-/// The filter's internal clamping (0.1-10.0) handles any edge cases.
+/// Uses config constants for musical range (POT_RESONANCE_MIN to POT_RESONANCE_MAX).
+/// Filter's internal clamping (FILTER_RESONANCE_MIN/MAX) provides safety bounds.
 pub fn map_resonance(normalized: f32) -> Message {
-    const RESONANCE_MIN: f32 = 0.1;  // Gentle filtering (minimal peak)
-    const RESONANCE_MAX: f32 = 1.2;  // Self-oscillation enabled
+    use crate::config::{POT_RESONANCE_MAX, POT_RESONANCE_MIN};
 
-    let resonance = RESONANCE_MIN + (RESONANCE_MAX - RESONANCE_MIN) * normalized;
+    let resonance = POT_RESONANCE_MIN + (POT_RESONANCE_MAX - POT_RESONANCE_MIN) * normalized;
     Message::SetResonance(resonance)
 }

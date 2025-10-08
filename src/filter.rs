@@ -3,12 +3,12 @@
 //! Provides simultaneous lowpass, highpass, and bandpass outputs.
 //! Uses Chamberlin topology for numerical stability and efficiency.
 //!
-//! Optimized: Parameters smoothed at buffer rate, coefficients cached for audio rate.
+//! Optimized: Coefficients cached at buffer rate, control smoothing via ADC multisampling.
 
 use crate::config::{
-    FILTER_CUTOFF_MAX, FILTER_INTEGRATOR_LIMIT, SAMPLE_RATE,
+    FILTER_CUTOFF_MAX, FILTER_INTEGRATOR_LIMIT, FILTER_RESONANCE_MAX, FILTER_RESONANCE_MIN,
+    SAMPLE_RATE,
 };
-use crate::slew::Slew;
 
 /// State Variable Filter with simultaneous LP/HP/BP outputs.
 ///
@@ -21,10 +21,10 @@ pub struct StateVariableFilter {
     lp: f32,
     /// Bandpass integrator state
     bp: f32,
-    /// Cutoff frequency in Hz (smoothed at buffer rate)
-    cutoff: Slew,
+    /// Cutoff frequency in Hz (updated at control rate from pots)
+    pub cutoff: f32,
     /// Resonance amount (0.0 = no resonance, 1.0+ = self-oscillation)
-    resonance: Slew,
+    pub resonance: f32,
     /// Sample rate in Hz
     sample_rate: f32,
     /// Cached frequency coefficient: f = 2π × fc/fs (updated per buffer)
@@ -33,6 +33,8 @@ pub struct StateVariableFilter {
     cached_q: f32,
     /// Whether to clamp integrators (true when resonance > 2.0)
     needs_clamping: bool,
+    /// Whether coefficients need recalculation (dirty flag optimization)
+    dirty: bool,
 }
 
 impl StateVariableFilter {
@@ -43,21 +45,23 @@ impl StateVariableFilter {
     /// * `resonance` - Resonance amount (0.0-1.2, typical 0.7 for gentle resonance)
     pub fn new(cutoff_hz: f32, resonance: f32) -> Self {
         let sample_rate = SAMPLE_RATE as f32;
-        let clamped_resonance = resonance.clamp(0.1, 10.0);
+        let clamped_cutoff = cutoff_hz.clamp(crate::config::FILTER_CUTOFF_MIN, FILTER_CUTOFF_MAX);
+        let clamped_resonance = resonance.clamp(FILTER_RESONANCE_MIN, FILTER_RESONANCE_MAX);
 
         // Pre-calculate initial coefficients
-        let f = (2.0 * core::f32::consts::PI * cutoff_hz / sample_rate).min(1.0);
+        let f = (2.0 * core::f32::consts::PI * clamped_cutoff / sample_rate).min(1.0);
         let q = 1.0 / clamped_resonance;
 
         Self {
             lp: 0.0,
             bp: 0.0,
-            cutoff: Slew::new(cutoff_hz),
-            resonance: Slew::new(clamped_resonance),
+            cutoff: clamped_cutoff,
+            resonance: clamped_resonance,
             sample_rate,
             cached_f: f,
             cached_q: q,
             needs_clamping: clamped_resonance > 2.0,
+            dirty: false, // Coefficients already calculated
         }
     }
 
@@ -67,38 +71,47 @@ impl StateVariableFilter {
     /// * `freq` - Cutoff frequency in Hz (FILTER_CUTOFF_MIN to FILTER_CUTOFF_MAX)
     #[inline]
     pub fn set_cutoff(&mut self, freq: f32) {
-        let safe_freq = freq.clamp(crate::config::FILTER_CUTOFF_MIN, FILTER_CUTOFF_MAX);
-        self.cutoff.set_target(safe_freq);
+        self.cutoff = freq.clamp(crate::config::FILTER_CUTOFF_MIN, FILTER_CUTOFF_MAX);
+        self.dirty = true; // Mark for coefficient recalculation (pot deadband handles tiny changes)
     }
 
     /// Set resonance amount.
     ///
     /// # Arguments
-    /// * `resonance` - Resonance (0.1-10.0, 1.0+ enables self-oscillation)
+    /// * `resonance` - Resonance (FILTER_RESONANCE_MIN to FILTER_RESONANCE_MAX)
     #[inline]
     pub fn set_resonance(&mut self, resonance: f32) {
-        let safe_resonance = resonance.clamp(0.1, 10.0);
-        self.resonance.set_target(safe_resonance);
+        self.resonance = resonance.clamp(FILTER_RESONANCE_MIN, FILTER_RESONANCE_MAX);
+        self.dirty = true; // Mark for coefficient recalculation (pot deadband handles tiny changes)
     }
 
-    /// Update filter coefficients from smoothed parameters.
+    /// Update filter coefficients from direct parameters.
     ///
     /// Call once per buffer before processing samples.
-    /// Advances Slew state and recalculates f and q coefficients.
+    /// Recalculates f and q coefficients from current cutoff/resonance values.
+    /// Only recalculates when parameters changed (dirty flag optimization).
     #[inline]
     pub fn update_coefficients(&mut self) {
-        // Advance smoothing (buffer rate, not audio rate!)
-        let cutoff_hz = self.cutoff.value();
-        let res = self.resonance.value();
+        // Early return if no parameters changed (most of the time)
+        if !self.dirty {
+            return;
+        }
+
+        // Use direct values (updated at control rate from pots)
+        let cutoff = self.cutoff;
+        let resonance = self.resonance;
 
         // Recalculate frequency coefficient: f = 2π × fc/fs
-        self.cached_f = (2.0 * core::f32::consts::PI * cutoff_hz / self.sample_rate).min(1.0);
+        self.cached_f = (2.0 * core::f32::consts::PI * cutoff / self.sample_rate).min(1.0);
 
         // Recalculate damping coefficient: q = 1/resonance
-        self.cached_q = 1.0 / res;
+        self.cached_q = 1.0 / resonance;
 
         // Conditional clamping: only needed at high resonance
-        self.needs_clamping = res > 2.0;
+        self.needs_clamping = resonance > 2.0;
+
+        // Clear dirty flag (coefficients now up to date)
+        self.dirty = false;
     }
 
     /// Process one sample through the filter (all three outputs).
@@ -106,10 +119,10 @@ impl StateVariableFilter {
     /// Uses cached coefficients - call update_coefficients() once per buffer first.
     ///
     /// # Arguments
-    /// * `input` - Input sample
+    /// * `input` - Input sample (normalized ±1.0)
     ///
     /// # Returns
-    /// Tuple of (lowpass, highpass, bandpass) outputs
+    /// Tuple of (lowpass, highpass, bandpass) outputs (nominally ±1.0, but can exceed with high resonance)
     ///
     /// # References
     /// Hal Chamberlin, "Musical Applications of Microprocessors" (1985)
@@ -131,8 +144,12 @@ impl StateVariableFilter {
 
         // Conditional integrator clamping (only at high resonance > 2.0)
         if self.needs_clamping {
-            self.bp = self.bp.clamp(-FILTER_INTEGRATOR_LIMIT, FILTER_INTEGRATOR_LIMIT);
-            self.lp = self.lp.clamp(-FILTER_INTEGRATOR_LIMIT, FILTER_INTEGRATOR_LIMIT);
+            self.bp = self
+                .bp
+                .clamp(-FILTER_INTEGRATOR_LIMIT, FILTER_INTEGRATOR_LIMIT);
+            self.lp = self
+                .lp
+                .clamp(-FILTER_INTEGRATOR_LIMIT, FILTER_INTEGRATOR_LIMIT);
         }
 
         // Return all three outputs

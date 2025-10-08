@@ -19,4 +19,49 @@
 - please number your questions so it's easier to discuss and reply. attach your recommandation to each question — based on software, hardware and digital audio best-pracrices.
 - when suggesting code to implement, think first: "can we make it more elegant and efficient? are we using best-practices to maximize performence and audio-quality?"
 - opt for using public fields instead of getter methods where it makes sense, we always prefer idiomatic and elegant Rust code
-- **CRITICAL**: Never call Slew.value() at audio rate (inside per-sample loops). Update slewed parameters once per buffer, cache the values, use cached values in the sample loop. Audio rate = 44.1kHz (per sample), Buffer rate = ~172Hz (per buffer), Control rate = 50Hz (ADC polls). Slew is for control→buffer rate smoothing only.
+
+## Processing Rate Architecture
+
+**Three Processing Rates:**
+- **Control Rate (50Hz)**: ADC pot polling - where parameter changes originate
+- **Buffer Rate (~172Hz)**: DMA buffer callbacks - message consumption & coefficient caching
+- **Audio Rate (44.1kHz)**: Per-sample processing - the super hot path
+
+**Engine Rate Methods** (see `src/engine.rs`):
+```rust
+// BUFFER RATE: Called once per buffer (~172Hz)
+fn consume_messages(&mut self)         // Drain pot message queue, set targets
+fn update_buffer_parameters(&mut self) // Recalc filter coefficients (if dirty)
+
+// AUDIO RATE: Called per sample (44.1kHz)
+fn render_sample(&mut self) -> f32     // Mix → normalize → filter
+```
+
+**Smoothing Decision Rules:**
+
+1. **Parameters that Multiply at Audio Rate** → **Use Slew (Audio Rate)**
+   - **Why**: Direct multiplication without smoothing causes zipper noise
+   - **Examples**: Oscillator pitch, oscillator level, mix normalization factor
+   - **Pattern**: Call `.value()` in audio-rate code (e.g., inside `tick()` or `render_sample()`)
+   - **Cost**: Minimal due to `settled` optimization (just branch check when stable)
+
+2. **Filter Parameters** → **Direct (No Slew)**
+   - **Why**: ADC multisampling (9×) provides sufficient smoothing. Dirty flag prevents redundant recalc.
+   - **Examples**: Filter cutoff, filter resonance
+   - **Pattern**: Direct assignment + dirty flag, coefficients cached at buffer rate
+   - **Cost**: Zero smoothing overhead
+
+3. **Modulation Sources** → **Generate Smooth (No Slew)**
+   - **Why**: LFOs/Envelopes produce smooth signals natively
+   - **Examples**: LFO output, ADSR envelope
+   - **Pattern**: Generate at audio rate, apply to Slew targets at buffer rate
+   - **Cost**: No additional smoothing
+
+**Signal Flow:**
+```
+Pots (50Hz) → [9× multisampling + deadband] → Messages → Targets
+                                                            ↓
+Buffer Rate (172Hz): consume_messages() → Slew.set_target() or direct assignment
+                                                            ↓
+Audio Rate (44.1kHz): render_sample() → Slew.value() for smooth params
+```
