@@ -43,6 +43,18 @@ pub const MAX_DB: f32 = 0.0;
 /// -60dB is well below audibility and allows significant optimization.
 pub const OSC_SILENCE_THRESHOLD: f32 = 0.001;
 
+/// PolyBLEP anti-aliasing threshold frequency (Hz).
+/// Below this frequency, square/saw waves skip PolyBLEP as aliasing is inaudible.
+/// At 1000 Hz, first aliased harmonic is the 23rd (-27dB down) at 21.1 kHz - barely audible.
+/// Below 1000 Hz, aliases are even weaker and effectively inaudible for drone synthesis.
+/// This threshold covers the entire FREQUENCY_MAX range (768 Hz) with headroom.
+pub const POLYBLEP_THRESHOLD_HZ: f32 = 1000.0;
+
+/// Phase increment threshold for PolyBLEP optimization.
+/// Oscillators with phase_inc below this skip PolyBLEP anti-aliasing.
+/// Calculated as: POLYBLEP_THRESHOLD_HZ / SAMPLE_RATE = 1000.0 / 44100.0
+pub const POLYBLEP_THRESHOLD_PHASE_INC: f32 = POLYBLEP_THRESHOLD_HZ / 44100.0;
+
 /// Master output gain applied after voice mixing (0.0 to 1.0).
 /// Provides headroom even when all voices are at max volume (0.95 ≈ -0.45 dB).
 pub const MASTER_GAIN: f32 = 0.85;
@@ -112,7 +124,7 @@ pub const POT_CHANGE_THRESHOLD: f32 = 0.0005;
 pub const POT_EXPONENT_SCALE: i32 = 2;
 
 /// Minimum frequency target for potentiometer control (Hz).
-pub const FREQUENCY_MIN: f32 = 1.0;
+pub const FREQUENCY_MIN: f32 = 25.0;
 
 /// Maximum frequency target for potentiometer control (Hz).
 pub const FREQUENCY_MAX: f32 = 768.0;
@@ -121,7 +133,7 @@ pub const FREQUENCY_MAX: f32 = 768.0;
 /// 100 cents = 1 semitone, 200 cents = 2 semitones.
 /// Larger values create more dramatic detuning effects for drone synthesis.
 /// Range: pot center = 0¢, pot min = -DETUNE_RANGE_CENTS, pot max = +DETUNE_RANGE_CENTS
-pub const DETUNE_RANGE_CENTS: f32 = FREQUENCY_MIN * 2.0;
+pub const DETUNE_RANGE_CENTS: f32 = FREQUENCY_MIN * 5.0;
 
 // === Potentiometer Resonance Mapping ===
 
@@ -139,7 +151,7 @@ pub const POT_RESONANCE_MAX: f32 = 10.0;
 /// Minimum cutoff frequency for Moog Ladder Filter (Hz).
 /// 20 Hz reaches sub-bass territory for extreme filtering effects.
 /// Moog ladder handles the full audible spectrum with no stability constraints.
-pub const FILTER_CUTOFF_MIN: f32 = FREQUENCY_MIN * 2.5;
+pub const FILTER_CUTOFF_MIN: f32 = FREQUENCY_MIN * 7.0;
 
 /// Maximum cutoff frequency for Moog Ladder Filter (Hz).
 /// Extended to 20 kHz to cover the full audible spectrum.

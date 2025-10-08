@@ -1,5 +1,6 @@
 use crate::config::{
-    DEFAULT_FREQUENCY, OSC_SILENCE_THRESHOLD, SAMPLE_RATE, WAVETABLE_MASK, WAVETABLE_SIZE_F32,
+    DEFAULT_FREQUENCY, OSC_SILENCE_THRESHOLD, POLYBLEP_THRESHOLD_PHASE_INC, SAMPLE_RATE,
+    WAVETABLE_MASK, WAVETABLE_SIZE_F32,
 };
 use crate::slew::Slew;
 
@@ -151,27 +152,28 @@ pub enum Waveform {
 /// PolyBLEP (Polynomial Bandlimited Step) residual correction.
 ///
 /// Smooths discontinuities to eliminate aliasing using 2nd-order polynomial.
-/// Simple arithmetic only - no transcendentals, optimal for ESP32-S3 FPU.
+/// Optimized: uses reciprocal multiply instead of division for CPU efficiency.
 ///
 /// # Arguments
 /// * `phase` - Current phase position [0.0, 1.0)
 /// * `phase_inc` - Phase increment per sample (frequency / sample_rate)
+/// * `phase_inc_reciprocal` - Reciprocal of phase_inc (1.0 / phase_inc)
 ///
 /// # Returns
 /// Correction residual to subtract from naive waveform
 ///
 /// Reference: Välimäki & Huovilainen (2007) "Antialiasing Oscillators"
 #[inline]
-fn poly_blep(phase: f32, phase_inc: f32) -> f32 {
+fn poly_blep(phase: f32, phase_inc: f32, phase_inc_reciprocal: f32) -> f32 {
     // Forward discontinuity (0 < phase < phase_inc)
     if phase < phase_inc {
-        let t = phase / phase_inc;
+        let t = phase * phase_inc_reciprocal;  // Multiply by reciprocal instead of divide
         // Polynomial: 2t - t² - 1
         t + t - t * t - 1.0
     }
     // Backward discontinuity (1 - phase_inc < phase < 1)
     else if phase > 1.0 - phase_inc {
-        let t = (phase - 1.0) / phase_inc;
+        let t = (phase - 1.0) * phase_inc_reciprocal;  // Multiply by reciprocal instead of divide
         // Polynomial: t² + 2t + 1
         t * t + t + t + 1.0
     }
@@ -332,24 +334,41 @@ impl Oscillator {
                 // Naive sawtooth: ramp from -1 to +1
                 let naive = (self.phase * 2.0) - 1.0;
 
-                // Apply PolyBLEP correction at phase wrap (use cached phase_inc)
-                naive - poly_blep(self.phase, phase_inc)
+                // Skip PolyBLEP at low frequencies where aliasing is inaudible
+                // Below 1000 Hz, first alias is -27dB or weaker (effectively inaudible)
+                if phase_inc < POLYBLEP_THRESHOLD_PHASE_INC {
+                    naive
+                } else {
+                    // Pre-calculate reciprocal once (saves 1 division in poly_blep)
+                    let phase_inc_reciprocal = 1.0 / phase_inc;
+                    // Apply PolyBLEP correction at phase wrap (optimized with reciprocal)
+                    naive - poly_blep(self.phase, phase_inc, phase_inc_reciprocal)
+                }
             }
             Waveform::Square => {
                 // Naive square wave: -1 or +1
                 let naive = if self.phase < 0.5 { 1.0 } else { -1.0 };
 
-                // Square has 2 discontinuities per cycle: at 0.0 and 0.5
-                // Correction at phase wrap (0 → 1 transition)
-                let corrected = naive - poly_blep(self.phase, phase_inc);
-
-                // Correction at midpoint (0.5 transition, inverted polarity)
-                let phase_mid = if self.phase < 0.5 {
-                    self.phase + 0.5
+                // Skip PolyBLEP at low frequencies where aliasing is inaudible
+                // Below 1000 Hz, first alias is -27dB or weaker (effectively inaudible)
+                if phase_inc < POLYBLEP_THRESHOLD_PHASE_INC {
+                    naive
                 } else {
-                    self.phase - 0.5
-                };
-                corrected + poly_blep(phase_mid, phase_inc)
+                    // Pre-calculate reciprocal once (saves 3 divisions across 2 poly_blep calls)
+                    let phase_inc_reciprocal = 1.0 / phase_inc;
+
+                    // Square has 2 discontinuities per cycle: at 0.0 and 0.5
+                    // Correction at phase wrap (0 → 1 transition)
+                    let corrected = naive - poly_blep(self.phase, phase_inc, phase_inc_reciprocal);
+
+                    // Correction at midpoint (0.5 transition, inverted polarity)
+                    let phase_mid = if self.phase < 0.5 {
+                        self.phase + 0.5
+                    } else {
+                        self.phase - 0.5
+                    };
+                    corrected + poly_blep(phase_mid, phase_inc, phase_inc_reciprocal)
+                }
             }
         };
 
