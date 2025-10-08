@@ -1,4 +1,6 @@
-use crate::config::{DEFAULT_FREQUENCY, SAMPLE_RATE, WAVETABLE_MASK, WAVETABLE_SIZE_F32};
+use crate::config::{
+    DEFAULT_FREQUENCY, OSC_SILENCE_THRESHOLD, SAMPLE_RATE, WAVETABLE_MASK, WAVETABLE_SIZE_F32,
+};
 use crate::slew::Slew;
 
 /// High-quality 1024-sample sine wave lookup table.
@@ -286,6 +288,20 @@ impl Oscillator {
     /// Returns a scaled f32 value: waveform * level (typically -1.0 to 1.0 range).
     #[inline]
     pub fn tick(&mut self) -> f32 {
+        // Early exit optimization: skip waveform generation if oscillator is silent
+        // Huge performance win when oscillators are at zero level (common in mix scenarios)
+        // Still advance phase to keep oscillator synchronized
+        let level = self.level.value();
+        if level < OSC_SILENCE_THRESHOLD {
+            // Advance phase to stay in sync (cheap: just add + branch)
+            let phase_inc = self.phase_increment.value();
+            self.phase += phase_inc;
+            if self.phase >= 1.0 {
+                self.phase -= 1.0;
+            }
+            return 0.0;
+        }
+
         // Smooth frequency at audio rate (~10ms response, settled optimization makes it cheap)
         let phase_inc = self.phase_increment.value();
 
@@ -337,8 +353,7 @@ impl Oscillator {
             }
         };
 
-        // Apply level with audio-rate smoothing (prevents zipper noise on volume changes)
-        // The settled optimization makes this cheap: just a branch check when stable
-        sample * self.level.value()
+        // Apply level (already retrieved above for silence check, reuse it)
+        sample * level
     }
 }

@@ -37,9 +37,15 @@ pub const MIN_DB: f32 = -60.0;
 /// Maximum level in decibels for metering and UI.
 pub const MAX_DB: f32 = 0.0;
 
+/// Oscillator silence threshold in linear amplitude (0.0-1.0).
+/// Derived from MIN_DB: 10^(-60/20) = 0.001 (cannot use pow in const context).
+/// Oscillators below this level skip waveform generation for CPU savings.
+/// -60dB is well below audibility and allows significant optimization.
+pub const OSC_SILENCE_THRESHOLD: f32 = 0.001;
+
 /// Master output gain applied after voice mixing (0.0 to 1.0).
 /// Provides headroom even when all voices are at max volume (0.95 ≈ -0.45 dB).
-pub const MASTER_GAIN: f32 = 0.95;
+pub const MASTER_GAIN: f32 = 0.85;
 
 // === Wavetable ===
 
@@ -58,6 +64,7 @@ pub const WAVETABLE_MASK: usize = WAVETABLE_SIZE - 1;
 /// Must be divisible by 4 (stereo `i16` frame size) to keep channels aligned.
 /// 2048 bytes = 512 stereo i16 samples = 11.6ms latency @ 44.1kHz
 /// Larger buffer provides more CPU time per callback, reducing underrun risk.
+/// VALUES THAT WORK (Don't remove this line): 2044, 4084, 1024
 pub const DMA_BUFFER_SIZE: usize = 4084;
 
 // === Messaging ===
@@ -105,22 +112,21 @@ pub const POT_CHANGE_THRESHOLD: f32 = 0.0005;
 pub const POT_EXPONENT_SCALE: i32 = 2;
 
 /// Minimum frequency target for potentiometer control (Hz).
-pub const FREQUENCY_MIN: f32 = 30.0;
+pub const FREQUENCY_MIN: f32 = 1.0;
 
 /// Maximum frequency target for potentiometer control (Hz).
-pub const FREQUENCY_MAX: f32 = 1024.0;
+pub const FREQUENCY_MAX: f32 = 768.0;
 
 /// Detune range in cents (applied as ±DETUNE_RANGE_CENTS).
 /// 100 cents = 1 semitone, 200 cents = 2 semitones.
 /// Larger values create more dramatic detuning effects for drone synthesis.
 /// Range: pot center = 0¢, pot min = -DETUNE_RANGE_CENTS, pot max = +DETUNE_RANGE_CENTS
-pub const DETUNE_RANGE_CENTS: f32 = 100.0;
+pub const DETUNE_RANGE_CENTS: f32 = FREQUENCY_MIN * 2.0;
 
 // === Potentiometer Resonance Mapping ===
 
 /// Minimum resonance value from pot (musical range, not safety clamp).
-/// 0.3 provides subtle filtering with minimal resonant peak.
-pub const POT_RESONANCE_MIN: f32 = 0.3;
+pub const POT_RESONANCE_MIN: f32 = 0.1;
 
 /// Maximum resonance value from pot (musical range, not safety clamp).
 /// 10.0 enables extreme self-oscillation for tonal effects and drone synthesis.
@@ -133,13 +139,13 @@ pub const POT_RESONANCE_MAX: f32 = 10.0;
 /// Minimum cutoff frequency for Moog Ladder Filter (Hz).
 /// 20 Hz reaches sub-bass territory for extreme filtering effects.
 /// Moog ladder handles the full audible spectrum with no stability constraints.
-pub const FILTER_CUTOFF_MIN: f32 = 20.0;
+pub const FILTER_CUTOFF_MIN: f32 = FREQUENCY_MIN * 2.5;
 
 /// Maximum cutoff frequency for Moog Ladder Filter (Hz).
 /// Extended to 20 kHz to cover the full audible spectrum.
 /// Moog ladder uses tan-based warping with saturation, stable across entire range.
 /// At 20 kHz: g = tan(π × 20k/44.1k) ≈ 6.8, well within safe limits.
-pub const FILTER_CUTOFF_MAX: f32 = 20000.0;
+pub const FILTER_CUTOFF_MAX: f32 = 18000.0;
 
 /// Default filter cutoff on initialization (Hz).
 /// 1 kHz provides balanced starting point - covers osc fundamental range (30-1024 Hz)
@@ -152,9 +158,8 @@ pub const FILTER_RESONANCE_MIN: f32 = 0.1;
 
 /// Maximum filter resonance (dimensionless Q factor).
 /// 10.0 enables strong self-oscillation for tonal effects.
-pub const FILTER_RESONANCE_MAX: f32 = 10.0;
+pub const FILTER_RESONANCE_MAX: f32 = 8.0;
 
 /// Default filter resonance on initialization (dimensionless Q factor).
 /// 0.7 provides gentle resonance without excessive peaking or ringing.
 pub const FILTER_RESONANCE_DEFAULT: f32 = 0.7;
-

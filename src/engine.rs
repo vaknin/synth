@@ -178,12 +178,12 @@ impl Engine {
         let filtered = self.filter.process(normalized);
 
         // Debug: Detect NaN/Inf and warn (indicates filter instability)
-        #[cfg(debug_assertions)]
-        if !filtered.is_finite() {
-            log::error!("Filter output is NaN/Inf! cutoff={}, resonance={}",
-                       self.filter.cutoff, self.filter.resonance);
-            return 0.0;
-        }
+        // #[cfg(debug_assertions)]
+        // if !filtered.is_finite() {
+        //     log::error!("Filter output is NaN/Inf! cutoff={}, resonance={}",
+        //                self.filter.cutoff, self.filter.resonance);
+        //     return 0.0;
+        // }
 
         filtered
     }

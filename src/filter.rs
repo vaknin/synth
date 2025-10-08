@@ -6,6 +6,7 @@
 //! Optimized: Coefficients cached at buffer rate, control smoothing via ADC multisampling.
 
 use crate::config::{FILTER_RESONANCE_MAX, FILTER_RESONANCE_MIN, SAMPLE_RATE};
+use crate::slew::Slew;
 use micromath::F32Ext;
 
 /// Moog Ladder Filter - 4-pole resonant lowpass.
@@ -13,7 +14,7 @@ use micromath::F32Ext;
 /// Improved Huovilainen topology with unconditional stability.
 /// Self-oscillates beautifully at high resonance (3.5+), classic analog sound.
 ///
-/// Call update_coefficients() once per buffer, then process() at audio rate.
+/// Coefficients smoothed at audio rate with fast-settling Slew.
 pub struct MoogLadderFilter {
     /// Stage 1-4 state variables (cascaded one-pole filters)
     stage: [f32; 4],
@@ -23,12 +24,12 @@ pub struct MoogLadderFilter {
     pub resonance: f32,
     /// Sample rate in Hz
     sample_rate: f32,
-    /// Cached normalized filter coefficient (g_norm = g/(1+g), updated per buffer)
-    cached_g_norm: f32,
-    /// Cached inverse of g_norm (1 - g_norm, updated per buffer)
-    cached_g_norm_inv: f32,
-    /// Cached resonance feedback (k = resonance × 4.0 × (1-g_comp), updated per buffer)
-    cached_k: f32,
+    /// Smoothed g_norm (audio-rate, fast settling for responsive control)
+    g_norm_slew: Slew,
+    /// Smoothed g_norm_inv (audio-rate, fast settling)
+    g_norm_inv_slew: Slew,
+    /// Smoothed k (audio-rate, fast settling)
+    k_slew: Slew,
     /// Whether coefficients need recalculation (dirty flag optimization)
     dirty: bool,
 }
@@ -41,7 +42,10 @@ impl MoogLadderFilter {
     /// * `resonance` - Resonance amount (0.1-10.0, typical 0.7 for gentle, 10.0 for extreme self-oscillation)
     pub fn new(cutoff_hz: f32, resonance: f32) -> Self {
         let sample_rate = SAMPLE_RATE as f32;
-        let clamped_cutoff = cutoff_hz.clamp(crate::config::FILTER_CUTOFF_MIN, crate::config::FILTER_CUTOFF_MAX);
+        let clamped_cutoff = cutoff_hz.clamp(
+            crate::config::FILTER_CUTOFF_MIN,
+            crate::config::FILTER_CUTOFF_MAX,
+        );
         let clamped_resonance = resonance.clamp(FILTER_RESONANCE_MIN, FILTER_RESONANCE_MAX);
 
         // Pre-calculate initial coefficients
@@ -61,9 +65,11 @@ impl MoogLadderFilter {
             cutoff: clamped_cutoff,
             resonance: clamped_resonance,
             sample_rate,
-            cached_g_norm: g_norm,
-            cached_g_norm_inv: g_norm_inv,
-            cached_k: k,
+            // Fast-settling Slew (α=0.95) for responsive yet smooth coefficient changes
+            // Settles in ~2ms vs 10ms for default 0.99 - critical for CPU efficiency
+            g_norm_slew: Slew::with_coeff(g_norm, 0.95),
+            g_norm_inv_slew: Slew::with_coeff(g_norm_inv, 0.95),
+            k_slew: Slew::with_coeff(k, 0.95),
             dirty: false, // Coefficients already calculated
         }
     }
@@ -74,7 +80,10 @@ impl MoogLadderFilter {
     /// * `freq` - Cutoff frequency in Hz (20-20000 Hz, full audible range)
     #[inline(always)]
     pub fn set_cutoff(&mut self, freq: f32) {
-        self.cutoff = freq.clamp(crate::config::FILTER_CUTOFF_MIN, crate::config::FILTER_CUTOFF_MAX);
+        self.cutoff = freq.clamp(
+            crate::config::FILTER_CUTOFF_MIN,
+            crate::config::FILTER_CUTOFF_MAX,
+        );
         self.dirty = true; // Mark for coefficient recalculation (pot deadband handles tiny changes)
     }
 
@@ -107,14 +116,17 @@ impl MoogLadderFilter {
         let wd = core::f32::consts::PI * self.cutoff / self.sample_rate;
         let g = wd.tan();
 
-        // Normalize g for stable one-pole integration (cache both g_norm and its inverse)
+        // Normalize g for stable one-pole integration
         let g_norm = g / (1.0 + g);
-        self.cached_g_norm = g_norm;
-        self.cached_g_norm_inv = 1.0 - g_norm;
+
+        // Set targets for audio-rate Slew smoothing (eliminates zipper noise)
+        // Fast settling (α=0.95) keeps CPU overhead minimal
+        self.g_norm_slew.set_target(g_norm);
+        self.g_norm_inv_slew.set_target(1.0 - g_norm);
 
         // Resonance compensation: reduces feedback as cutoff increases for stability
-        // This is critical for the Huovilainen model to prevent runaway oscillation
-        self.cached_k = self.resonance * 4.0 * (1.0 - g_norm);
+        let k = self.resonance * 4.0 * (1.0 - g_norm);
+        self.k_slew.set_target(k);
 
         // Clear dirty flag (coefficients now up to date)
         self.dirty = false;
@@ -122,8 +134,8 @@ impl MoogLadderFilter {
 
     /// Process one sample through the filter (AUDIO RATE 44.1kHz - HOT PATH).
     ///
-    /// Uses cached coefficients - call update_coefficients() once per buffer first.
-    /// No expensive math ops here, just multiplies and adds.
+    /// Smooths coefficients at audio rate with fast-settling Slew (α=0.95).
+    /// Settled optimization keeps this cheap when filter isn't changing (~2ms settling).
     ///
     /// # Arguments
     /// * `input` - Input sample (normalized ±1.0)
@@ -135,15 +147,15 @@ impl MoogLadderFilter {
     /// Antti Huovilainen, "Non-linear digital implementation of the Moog ladder filter" (2004)
     #[inline(always)]
     pub fn process(&mut self, input: f32) -> f32 {
-        // Use cached coefficients (all expensive ops done at buffer rate)
-        let g_norm = self.cached_g_norm;
-        let g_inv = self.cached_g_norm_inv;
-        let k = self.cached_k;
+        // Get smoothed coefficients (fast settling α=0.95, cheap when static via settled flag)
+        let g_norm = self.g_norm_slew.value();
+        let g_inv = self.g_norm_inv_slew.value();
+        let k = self.k_slew.value();
 
-        // Feedback from output with soft saturation (prevents runaway oscillation + analog character)
-        // Fast approximation: x / (1 + |x|) where abs() compiles to single bit manipulation
+        // Feedback from output with hard clamp (prevents runaway oscillation)
+        // Simple clamp is fastest - no division, no extra multiplies
         let fb = k * self.stage[3];
-        let feedback = fb / (1.0 + fb.abs());
+        let feedback = fb.clamp(-1.0, 1.0);
 
         // Process through 4 cascaded one-pole filters
         // Unrolled for performance (4 iterations, no loop overhead)
