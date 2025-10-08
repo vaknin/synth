@@ -177,15 +177,8 @@ impl Engine {
         // Process through Moog Ladder Filter (lowpass only, cached coefficients)
         let filtered = self.filter.process(normalized);
 
-        // Debug: Detect NaN/Inf and warn (indicates filter instability)
-        // #[cfg(debug_assertions)]
-        // if !filtered.is_finite() {
-        //     log::error!("Filter output is NaN/Inf! cutoff={}, resonance={}",
-        //                self.filter.cutoff, self.filter.resonance);
-        //     return 0.0;
-        // }
-
         filtered
+        // normalized
     }
 
     /// Render audio samples into the DMA buffer.
