@@ -1,4 +1,5 @@
-//! Drone synthesizer for ESP32-S3
+//! Prototype synthesizer for ESP32-S3
+//! MVP testbed for evaluating features before final pocket synth design
 //!
 //! Architecture:
 //! - Dual-core: Audio streaming on Core 0 (main), ADC polling on Core 1 (secondary)
@@ -61,6 +62,8 @@ async fn main(_spawner: Spawner) {
         peripherals.GPIO4,
         peripherals.GPIO5,
         peripherals.GPIO6,
+        peripherals.GPIO7,
+        peripherals.GPIO8,
     );
 
     // Start Core 1 (APP_CPU) for ADC polling - offload blocking ADC reads to secondary core
@@ -83,12 +86,13 @@ async fn main(_spawner: Spawner) {
         .unwrap();
 
     // Core 0 (PRO_CPU) continues here - initialize audio hardware
+    // I2S moved to GPIO33/34/35 to free GPIO7/8/9 for ADC expansion
     let mut audio_stream: AudioStream = hardware::setup_audio(
         peripherals.I2S0,
         dma_channel,
-        peripherals.GPIO7,
-        peripherals.GPIO8,
-        peripherals.GPIO9,
+        peripherals.GPIO33,
+        peripherals.GPIO34,
+        peripherals.GPIO35,
         tx_buffer,
         tx_descriptors,
     );

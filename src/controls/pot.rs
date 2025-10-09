@@ -32,9 +32,10 @@ pub enum Range {
     /// Linear interpolation: min + (max - min) × curved_value
     /// Equal spacing across range
     Linear { min: f32, max: f32 },
-    /// Geometric scaling: min × (max/min)^curved_value
+    /// Geometric scaling: min × ratio^curved_value
     /// Equal spacing across octaves/decades - perfect for pitch!
-    Geometric { min: f32, max: f32 },
+    /// `ratio` = max/min (pre-calculated to eliminate division)
+    Geometric { min: f32, ratio: f32 },
     /// Bipolar/centered: maps 0.0-1.0 to -range to +range
     /// Input 0.5 → 0.0 (center), useful for detune, pan, modulation
     Bipolar { range: f32 },
@@ -70,7 +71,8 @@ impl Range {
         match self {
             Range::Linear { min, max } => min + (max - min) * curved,
             // Use micromath for embedded-optimized powf (no std dependency)
-            Range::Geometric { min, max } => min * (max / min).powf(curved),
+            // Ratio is pre-calculated (max/min) to eliminate runtime division
+            Range::Geometric { min, ratio } => min * ratio.powf(curved),
             Range::Bipolar { range } => (curved - 0.5) * (range * 2.0),
         }
     }
@@ -150,7 +152,7 @@ impl Potentiometer {
 
         // 2. Average samples (multisampling reduces noise)
         let sum: u32 = self.samples.iter().map(|&s| s as u32).sum();
-        let avg = (sum / self.samples.len() as u32) as f32;
+        let avg = sum as f32 * ADC_MULTISAMPLING_COUNT_RECIPROCAL;
 
         // 3. Single-stage smoothing: multisampling only (no EMA)
         // Oscillator params: Multisampling (9×) → Slew (audio rate 44.1kHz) for zipper prevention
@@ -160,7 +162,7 @@ impl Potentiometer {
         // self.filtered = avg; // Direct use of averaged value
 
         // 4. Normalize to 0.0-1.0 range using calibrated min/max, defensive clamping
-        let normalized = (self.filtered / (POT_MAX as f32)).clamp(0.0, 1.0);
+        let normalized = (self.filtered * POT_MAX_RECIPROCAL).clamp(0.0, 1.0);
 
         // 5. Deadband check: only send if changed significantly
         if (normalized - self.last_sent).abs() >= POT_CHANGE_THRESHOLD {
@@ -178,15 +180,15 @@ impl Potentiometer {
 
 /// Map normalized value (0.0-1.0) to master pitch frequency.
 ///
-/// Uses Power + Linear: compresses low frequencies, spreads high frequencies.
-/// Gives more pot travel to the upper range for precise tuning.
+/// Uses Linear + Geometric: equal octaves per pot rotation (musically correct).
+/// 4-768 Hz = 7.58 octaves, each 10% pot travel = ~0.758 octaves.
 pub fn map_master_pitch(normalized: f32) -> Message {
     let freq = map_range(
         normalized,
-        Curve::Power,
-        Range::Linear {
+        Curve::Linear,
+        Range::Geometric {
             min: FREQUENCY_MIN,
-            max: FREQUENCY_MAX,
+            ratio: FREQUENCY_MAX / FREQUENCY_MIN, // 768/4 = 192 (const-folded)
         },
     );
     Message::SetMasterPitch(freq)
@@ -219,17 +221,17 @@ pub fn map_osc_detune(osc_id: crate::message::OscillatorId, normalized: f32) -> 
 
 /// Map normalized value (0.0-1.0) to filter cutoff frequency.
 ///
-/// Uses Power + Geometric for perceptually even octave spacing.
-/// Each pot rotation covers similar musical intervals across the entire range.
+/// Uses Linear + Geometric for perceptually even octave spacing.
+/// 200-15000 Hz = 6.23 octaves, equal precision across entire range.
 pub fn map_cutoff(normalized: f32) -> Message {
     use crate::config::{FILTER_CUTOFF_MAX, FILTER_CUTOFF_MIN};
 
     let freq = map_range(
         normalized,
-        Curve::Power,
+        Curve::Linear,
         Range::Geometric {
             min: FILTER_CUTOFF_MIN,
-            max: FILTER_CUTOFF_MAX,
+            ratio: FILTER_CUTOFF_MAX / FILTER_CUTOFF_MIN, // 15000/200 = 75 (const-folded)
         },
     );
     Message::SetCutoff(freq)
@@ -251,4 +253,35 @@ pub fn map_resonance(normalized: f32) -> Message {
         },
     );
     Message::SetResonance(resonance)
+}
+
+/// Map normalized value (0.0-1.0) to LFO rate.
+///
+/// Uses Linear + Geometric for equal decades per pot rotation.
+/// 0.01-10 Hz = 3 decades (0.01→0.1→1.0→10), musically useful range.
+pub fn map_lfo_rate(normalized: f32) -> Message {
+    use crate::config::{LFO_FREQUENCY_MAX, LFO_FREQUENCY_MIN};
+
+    let rate = map_range(
+        normalized,
+        Curve::Linear,
+        Range::Geometric {
+            min: LFO_FREQUENCY_MIN,
+            ratio: LFO_FREQUENCY_MAX / LFO_FREQUENCY_MIN, // 10/0.01 = 1000 (const-folded)
+        },
+    );
+    Message::SetFilterLfoRate(rate)
+}
+
+/// Map normalized value (0.0-1.0) to LFO depth.
+///
+/// Uses Linear + Linear for direct, predictable modulation amount.
+/// Engine converts depth to Hz range (±2 octaves from base cutoff).
+pub fn map_lfo_depth(normalized: f32) -> Message {
+    let depth = map_range(
+        normalized,
+        Curve::Linear,
+        Range::Linear { min: 0.0, max: 1.0 },
+    );
+    Message::SetFilterLfoDepth(depth)
 }

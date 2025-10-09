@@ -91,3 +91,4 @@ Audio Rate (44.1kHz): render_sample() → Performance params: .value() (pitch, l
 - Use hard clamp `fb.clamp(-1.0, 1.0)` for feedback, NOT division-based saturation
 - Rational functions like `x / (1 + x²)` are too expensive for 44.1kHz audio rate
 - Hard clamp is 2-3 cycles vs 10-40 cycles for division
+- when adding comments to code, make sure first the comment is actually strictly needed, and that it's concise

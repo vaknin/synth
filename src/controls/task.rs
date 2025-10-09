@@ -11,20 +11,22 @@ use embassy_time::{Duration, Timer};
 /// Owns the ADC peripheral and all pot pins. Each pot has independent
 /// signal processing state (EMA filter, deadband) but shares the hardware.
 ///
-/// Current 6-pot setup:
-/// - Pot 0 (GPIO1): Master Pitch (30Hz-1024Hz)
-/// - Pot 1 (GPIO2): Osc1 Level (0.0-1.0)
-/// - Pot 2 (GPIO3): Osc2 Detune (±DETUNE_RANGE_CENTS)
-/// - Pot 3 (GPIO4): Osc2 Level (0.0-1.0)
-/// - Pot 4 (GPIO5): Filter Cutoff (20Hz-7kHz)
-/// - Pot 5 (GPIO6): Filter Resonance (0.1-1.2)
+/// Current 8-pot setup (Phase 3.5):
+/// - Pot 0 (GPIO1): Master Pitch
+/// - Pot 1 (GPIO2): Osc1 Level
+/// - Pot 2 (GPIO3): Osc2 Detune
+/// - Pot 3 (GPIO4): Osc2 Level
+/// - Pot 4 (GPIO5): Filter Cutoff
+/// - Pot 5 (GPIO6): Filter Resonance
+/// - Pot 6 (GPIO7): Filter LFO Rate
+/// - Pot 7 (GPIO8): Filter LFO Depth
 ///
 /// # Arguments
 /// * `sender` - Embassy channel sender for control messages
 /// * `adc_bus` - ADC bus with ADC peripheral (owned by this task)
 /// * `pins` - Array of type-erased ADC pins (owned by this task)
 #[embassy_executor::task]
-pub async fn pot_task(sender: CtrlSender, mut adc_bus: AdcBus, mut pins: [AnyAdcPin; 6]) {
+pub async fn pot_task(sender: CtrlSender, mut adc_bus: AdcBus, mut pins: [AnyAdcPin; 8]) {
     // Create pot state objects with mapping functions
     let mut pots = [
         Potentiometer::new(map_master_pitch),
@@ -33,6 +35,8 @@ pub async fn pot_task(sender: CtrlSender, mut adc_bus: AdcBus, mut pins: [AnyAdc
         Potentiometer::new(|n| map_osc_level(OscillatorId::Osc2, n)),
         Potentiometer::new(crate::controls::map_cutoff),
         Potentiometer::new(map_resonance),
+        Potentiometer::new(crate::controls::map_lfo_rate),
+        Potentiometer::new(crate::controls::map_lfo_depth),
     ];
 
     loop {

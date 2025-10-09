@@ -1,5 +1,6 @@
 //! Hardware initialization and configuration.
 
+use crate::{config::SAMPLE_RATE, AudioStream};
 use esp_hal::{
     analog::adc::{Adc, AdcCalCurve, AdcPin},
     dma::DmaDescriptor,
@@ -8,7 +9,6 @@ use esp_hal::{
     time::Rate,
     Blocking,
 };
-use crate::{config::SAMPLE_RATE, AudioStream};
 
 /// Slim controller: own only the ADC peripheral.
 pub struct AdcBus {
@@ -19,15 +19,24 @@ pub struct AdcBus {
 pub type PotPin<P> = AdcPin<P, ADC1<'static>, AdcCalCurve<ADC1<'static>>>;
 pub type Adc1 = Adc<'static, ADC1<'static>, Blocking>;
 
-// GPIO type aliases for ADC pins (Phase 2: 6 pots)
+// I2S peripheral type aliases (for audio setup)
+type I2s0Peripheral = esp_hal::peripherals::I2S0<'static>;
+type DmaChannel0 = esp_hal::peripherals::DMA_CH0<'static>;
+type Gpio33 = esp_hal::peripherals::GPIO33<'static>;
+type Gpio34 = esp_hal::peripherals::GPIO34<'static>;
+type Gpio35 = esp_hal::peripherals::GPIO35<'static>;
+
+// GPIO type aliases for ADC pins (Phase 3.5: 8 pots)
 type GPIO1 = peripherals::GPIO1<'static>;
 type GPIO2 = peripherals::GPIO2<'static>;
 type GPIO3 = peripherals::GPIO3<'static>;
 type GPIO4 = peripherals::GPIO4<'static>;
 type GPIO5 = peripherals::GPIO5<'static>;
 type GPIO6 = peripherals::GPIO6<'static>;
+type GPIO7 = peripherals::GPIO7<'static>;
+type GPIO8 = peripherals::GPIO8<'static>;
 
-// Generate AnyAdcPin enum + setup_adc! macro for 6 pots
+// Generate AnyAdcPin enum + setup_adc! macro for 8 pots
 adc_pins! {
     1: GPIO1,
     2: GPIO2,
@@ -35,6 +44,8 @@ adc_pins! {
     4: GPIO4,
     5: GPIO5,
     6: GPIO6,
+    7: GPIO7,
+    8: GPIO8,
 }
 
 /// Initialize I2S audio output and return ready-to-use DMA transaction.
@@ -42,28 +53,30 @@ adc_pins! {
 /// Configures I2S in Philips standard stereo mode (16-bit samples),
 /// sets up circular DMA transfer, and returns transaction ready for push_with().
 ///
-/// # Pin Configuration
-/// - BCLK (bit clock) => GPIO7
-/// - WS (word select) => GPIO8
-/// - DOUT (data out) => GPIO9
+/// # Pin Configuration (Non-ADC GPIOs)
+/// - BCK (bit clock) => GPIO33
+/// - LRCK (word select) => GPIO34
+/// - DATA (data out) => GPIO35
+///
+/// GPIO33-35 have no ADC capability, freeing GPIO7-9 for future pot expansion.
 ///
 /// # Arguments
 /// * `i2s0` - I2S0 peripheral
 /// * `dma_channel` - DMA channel for circular buffer
-/// * `gpio7` - BCLK pin
-/// * `gpio8` - WS pin
-/// * `gpio9` - DOUT pin
+/// * `gpio33` - BCLK pin
+/// * `gpio34` - WS pin
+/// * `gpio35` - DOUT pin
 /// * `tx_buffer` - DMA transmit buffer (from dma_circular_buffers! macro)
 /// * `tx_descriptors` - DMA descriptors (from dma_circular_buffers! macro)
 ///
 /// # Returns
 /// Configured I2S DMA transaction ready for audio rendering
 pub fn setup_audio(
-    i2s0: esp_hal::peripherals::I2S0<'static>,
-    dma_channel: esp_hal::peripherals::DMA_CH0<'static>,
-    gpio7: esp_hal::peripherals::GPIO7<'static>,
-    gpio8: esp_hal::peripherals::GPIO8<'static>,
-    gpio9: esp_hal::peripherals::GPIO9<'static>,
+    i2s0: I2s0Peripheral,
+    dma_channel: DmaChannel0,
+    gpio33: Gpio33,
+    gpio34: Gpio34,
+    gpio35: Gpio35,
     tx_buffer: &'static mut [u8],
     tx_descriptors: &'static mut [DmaDescriptor],
 ) -> AudioStream {
@@ -76,9 +89,9 @@ pub fn setup_audio(
     )
     .into_async()
     .i2s_tx
-    .with_bclk(gpio7)
-    .with_ws(gpio8)
-    .with_dout(gpio9)
+    .with_bclk(gpio33)
+    .with_ws(gpio34)
+    .with_dout(gpio35)
     .build(tx_descriptors);
 
     i2s_tx.write_dma_circular_async(tx_buffer).unwrap()

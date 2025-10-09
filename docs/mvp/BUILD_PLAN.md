@@ -1,8 +1,12 @@
-# Drone Synthesizer MVP Build Plan
+# Prototype Synthesizer MVP Build Plan
 
-Refactoring roadmap: migrating from polyphonic voice-based architecture to monophonic drone synthesizer with professional audio quality.
+**Purpose**: This is a breadboard experimentation platform for discovering what makes a great pocket synthesizer. We're building and testing every feature we can think of—oscillators, filters, LFOs, effects, modulation—to find what's genuinely fun and musically inspiring. The end goal is a pocket-portable synth where physical space is at a premium, so we're prototyping extensively now to choose only the best features for the final device.
+
+**Philosophy**: Build everything, play with everything, keep only the amazing parts. This MVP lets us iterate quickly without committing to a form factor or final feature set. Every pot and control we add teaches us what's worth dedicating precious enclosure space to.
 
 **Hardware Status**: ✅ All components available (ESP32-S3, PCM5102A, ADS1115 modules, pots, breadboards)
+
+**Current Architecture**: Monophonic with 4-oscillator mixing, Moog ladder filter, professional audio quality (16-bit @ 44.1kHz)
 
 ---
 
@@ -255,7 +259,7 @@ async fn render(&mut self, audio_stream: &mut AudioStream) {
 ## Phase 1: Architecture Refactor - Polyphonic → Monophonic
 
 **Status**: ✅ **COMPLETE** (with Phase 2 filter + Phase 3 optimizations integrated)
-**Goal**: Migrate from Voice-based polyphonic to direct Oscillator-based monophonic drone architecture
+**Goal**: Migrate from Voice-based polyphonic to direct Oscillator-based monophonic architecture for experimental feature testing
 
 **Critical Performance Optimizations Implemented:**
 - ✅ **Slew settled optimization**: Added `settled` flag to skip EMA computation when parameter stable (~80% reduction)
@@ -356,7 +360,7 @@ async fn render(&mut self, audio_stream: &mut AudioStream) {
 - ⏸️ Calibrate Drive curve for warmth without harshness
 - ⏸️ Add master Volume control with logarithmic pot scaling
 - ⏸️ Tune all parameter ranges for musicality
-- ⏸️ Document optimal control positions for various drone textures
+- ⏸️ Document optimal control positions for various timbres and textures
 
 **Current Pot Mapping (6 pots wired):**
 - Pot 4 (GPIO5): `Cutoff` (165Hz - 18kHz exponential) ✅
@@ -399,14 +403,14 @@ async fn render(&mut self, audio_stream: &mut AudioStream) {
 ## Phase 3.5: Filter Cutoff LFO (Highest Priority Modulation)
 
 **Status**: 🚀 **READY TO START**
-**Goal**: Add filter cutoff modulation for evolving drone textures (adds 2 pots: LFO Rate, LFO Depth)
+**Goal**: Add filter cutoff modulation for evolving timbral textures (adds 2 pots: LFO Rate, LFO Depth)
 
 **Rationale - Why Filter Cutoff LFO is Most Impactful:**
-1. **Core of drone synthesis**: Timbral evolution over time creates psychoacoustic interest
-2. **Classic modular technique**: Filter sweeps are the essence of vintage drone/ambient synthesis
-3. **Musical range**: 0.01-10Hz covers slow pads (30s cycle) to rhythmic pulses (0.1s cycle)
+1. **Timbral evolution**: Movement over time creates psychoacoustic interest and keeps sounds engaging
+2. **Classic modular technique**: Filter sweeps are fundamental to vintage analog synthesis and ambient music
+3. **Musical range**: 0.01-10Hz covers slow evolving pads (30s cycle) to rhythmic pulses (0.1s cycle)
 4. **Works with existing architecture**: Modulates cutoff parameter at buffer rate (no new signal chain elements)
-5. **Immediate sonic impact**: More dramatic than pitch LFO for sustained drones
+5. **Immediate sonic impact**: Dramatic effect on character—tests whether modulation is worth the knob space
 
 **Implementation Architecture:**
 
@@ -515,7 +519,7 @@ pub enum Message {
 pub fn map_lfo_rate(normalized: f32) -> f32 {
     // Exponential curve: 10^(normalized × 3 - 2) = 0.01 to 10.0
     // normalized 0.0 → 10^-2 = 0.01 Hz
-    // normalized 0.5 → 10^-0.5 ≈ 0.316 Hz (sweet spot for drones)
+    // normalized 0.5 → 10^-0.5 ≈ 0.316 Hz (sweet spot for evolving textures)
     // normalized 1.0 → 10^1 = 10 Hz
     let exponent = normalized * 3.0 - 2.0;
     micromath::F32Ext::powf(10.0, exponent).clamp(0.01, 10.0)
@@ -542,7 +546,7 @@ pub fn map_lfo_depth(normalized: f32) -> f32 {
 7. [ ] Wire pots 6-7 in controls/task.rs
 8. [ ] Test LFO range: verify smooth sweeps at 0.1 Hz, 1 Hz, 10 Hz
 9. [ ] Tune depth scaling for musical range (start with ±2 octaves)
-10. [ ] Document sweet spots (e.g., 0.5 Hz rate + 50% depth = classic drone texture)
+10. [ ] Document sweet spots (e.g., 0.5 Hz rate + 50% depth = classic evolving pad texture)
 
 **Performance Considerations:**
 - ✅ Reuses existing SINE wavetable (no extra memory)
@@ -562,7 +566,7 @@ pub fn map_lfo_depth(normalized: f32) -> f32 {
 - ✅ LFO generates clean sine wave at all rates (0.01-10 Hz)
 - ✅ Filter cutoff sweeps smoothly without clicks or zipper noise
 - ✅ Depth control provides intuitive scaling (0% = static, 100% = dramatic sweep)
-- ✅ Can create classic drone textures: slow pad evolution, rhythmic filter pulses
+- ✅ Can create evolving textures: slow pad evolution, rhythmic filter pulses, timbral movement
 - ✅ No CPU overhead or audio glitches with LFO running
 - ✅ 8 pots total wired and functional
 
@@ -606,7 +610,7 @@ pub fn map_lfo_depth(normalized: f32) -> f32 {
 - [ ] Wire additional ADS1115 modules for remaining pots (controls 8-18)
 - [ ] Map remaining pots: Filter LFO Rate/Depth, Pitch LFO Rate/Depth, Delay Time/Feedback, Reverb Mix, Drive, Sub Level, Noise Level, Volume
 
-**Decision Point**: Only pursue if Phase 1-3 delivers satisfying core drone synthesis
+**Decision Point**: Only pursue if Phase 1-3 proves these features are worth adding to the final pocket synth. Test extensively to determine which controls provide the most musical value per knob.
 
 ---
 
@@ -664,7 +668,7 @@ pub fn map_lfo_depth(normalized: f32) -> f32 {
 - ✅ Master volume control provides proper output scaling
 - ✅ Full signal chain OSC→Moog Filter→Drive→Output sounds professional
 - ✅ All 11 pots wired and functional
-- ✅ Can create evolving drone textures continuously
+- ✅ Can create evolving textures and sustained sounds continuously
 - ✅ 16-bit audio @ 44.1kHz with 5.8ms latency (1024-byte buffer)
 
 ### Phase 3 (Performance Optimization) Complete When:
@@ -698,7 +702,7 @@ pub fn map_lfo_depth(normalized: f32) -> f32 {
 **Mitigation**: Work on feature branch `monophony`; keep stable polyphonic version on `main`
 
 **Risk**: Monophonic design feels limiting after polyphonic experience
-**Mitigation**: Focus on rich timbral control (4 oscillators, filter modes, effects); drones don't need polyphony
+**Mitigation**: Focus on rich timbral control (4 oscillators, filter modes, effects). If polyphony proves essential during testing, we'll know to include it in the final design. This is what prototyping is for.
 
 **Risk**: DMA buffer underruns during refactor
 **Mitigation**: Current 2044-byte buffer is proven stable; maintain same buffer size

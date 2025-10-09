@@ -14,6 +14,7 @@ pub mod controls;
 pub mod engine;
 pub mod filter;
 pub mod hardware;
+pub mod lfo;
 pub mod message;
 pub mod oscillator;
 pub mod slew;

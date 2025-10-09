@@ -47,18 +47,18 @@ pub const OSC_SILENCE_THRESHOLD: f32 = 0.001;
 /// PolyBLEP anti-aliasing threshold frequency (Hz).
 /// Below this frequency, square/saw waves skip PolyBLEP as aliasing is inaudible.
 /// At 1000 Hz, first aliased harmonic is the 23rd (-27dB down) at 21.1 kHz - barely audible.
-/// Below 1000 Hz, aliases are even weaker and effectively inaudible for drone synthesis.
+/// Below 1000 Hz, aliases are even weaker and effectively inaudible for low-frequency synthesis.
 /// This threshold covers the entire FREQUENCY_MAX range (768 Hz) with headroom.
 pub const POLYBLEP_THRESHOLD_HZ: f32 = 1000.0;
 
 /// Phase increment threshold for PolyBLEP optimization.
 /// Oscillators with phase_inc below this skip PolyBLEP anti-aliasing.
-/// Calculated as: POLYBLEP_THRESHOLD_HZ / SAMPLE_RATE = 1000.0 / 44100.0
-pub const POLYBLEP_THRESHOLD_PHASE_INC: f32 = POLYBLEP_THRESHOLD_HZ / 44100.0;
+/// Calculated as: POLYBLEP_THRESHOLD_HZ / SAMPLE_RATE
+pub const POLYBLEP_THRESHOLD_PHASE_INC: f32 = POLYBLEP_THRESHOLD_HZ / SAMPLE_RATE as f32;
 
 /// Master output gain applied after voice mixing (0.0 to 1.0).
 /// Provides headroom even when all voices are at max volume (0.95 ≈ -0.45 dB).
-pub const MASTER_GAIN: f32 = 0.85;
+pub const MASTER_GAIN: f32 = 0.90;
 
 // === Wavetable ===
 
@@ -105,6 +105,9 @@ pub const ADC_POLL_INTERVAL_MS: u64 = 20;
 /// Dual-core architecture allows high multisampling without audio impact.
 pub const ADC_MULTISAMPLING_COUNT: usize = 9;
 
+/// Reciprocal of ADC_MULTISAMPLING_COUNT for division elimination.
+pub const ADC_MULTISAMPLING_COUNT_RECIPROCAL: f32 = 1.0 / ADC_MULTISAMPLING_COUNT as f32;
+
 /// EMA filter alpha coefficient for ADC smoothing (0.0 to 1.0).
 /// Higher values add smoothing; lower values respond faster to changes.
 pub const ADC_EMA_ALPHA: f32 = 0.8;
@@ -116,6 +119,9 @@ pub const POT_MIN: u16 = 0;
 
 /// Potentiometer maximum millivolt value (~3.156 V with 11 dB attenuation on ESP32-S3).
 pub const POT_MAX: u16 = 3156;
+
+/// Reciprocal of POT_MAX for division elimination.
+pub const POT_MAX_RECIPROCAL: f32 = 1.0 / POT_MAX as f32;
 
 /// Normalized threshold before treating a potentiometer change as meaningful.
 /// 0.001 roughly maps to ~1 Hz increments across the usable range.
@@ -132,7 +138,7 @@ pub const FREQUENCY_MAX: f32 = 768.0;
 
 /// Detune range in cents (applied as ±DETUNE_RANGE_CENTS).
 /// 100 cents = 1 semitone, 200 cents = 2 semitones.
-/// Larger values create more dramatic detuning effects for drone synthesis.
+/// Larger values create more dramatic detuning effects for rich, evolving timbres.
 /// Range: pot center = 0¢, pot min = -DETUNE_RANGE_CENTS, pot max = +DETUNE_RANGE_CENTS
 pub const DETUNE_RANGE_CENTS: f32 = 1200.0 * 2.0;
 
@@ -146,7 +152,7 @@ pub const CENTS_TO_OCTAVES: f32 = 1.0 / 1200.0;
 /// Minimum cutoff frequency for Moog Ladder Filter (Hz).
 /// 20 Hz reaches sub-bass territory for extreme filtering effects.
 /// Moog ladder handles the full audible spectrum with no stability constraints.
-pub const FILTER_CUTOFF_MIN: f32 = FREQUENCY_MIN * 6.0;
+pub const FILTER_CUTOFF_MIN: f32 = FREQUENCY_MIN * 50.0;
 
 /// Maximum cutoff frequency for Moog Ladder Filter (Hz).
 /// Extended to 20 kHz to cover the full audible spectrum.
@@ -163,3 +169,21 @@ pub const FILTER_RESONANCE_MIN: f32 = 0.1;
 /// At k≈4.0, loop gain reaches unity and filter whistles musically.
 /// Higher values overdrive the feedback path, losing the characteristic Moog tone.
 pub const FILTER_RESONANCE_MAX: f32 = 2.0;
+
+// === LFO (Low-Frequency Oscillator) ===
+
+/// Minimum LFO frequency (Hz).
+/// 0.01 Hz = 100 second cycle (ultra-slow pad evolution).
+pub const LFO_FREQUENCY_MIN: f32 = 0.01;
+
+/// Maximum LFO frequency (Hz).
+/// 10 Hz = 0.1 second cycle (rhythmic pulses, tremolo effects).
+pub const LFO_FREQUENCY_MAX: f32 = 10.0;
+
+/// Default LFO frequency on initialization (Hz).
+/// 0.1 Hz = 10 second cycle (gentle evolution, safe default).
+pub const LFO_FREQUENCY_DEFAULT: f32 = 0.1;
+
+/// Default LFO depth on initialization (0.0-1.0).
+/// Zero depth = no modulation until pot message arrives.
+pub const LFO_DEPTH_DEFAULT: f32 = 0.0;

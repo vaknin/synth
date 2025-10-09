@@ -2,12 +2,13 @@
 
 use crate::config::{FREQUENCY_MIN, MASTER_GAIN};
 use crate::filter::MoogLadderFilter;
+use crate::lfo::LFO;
 use crate::message::Message;
 use crate::oscillator::{Oscillator, Waveform};
 use crate::slew::Slew;
 use crate::{AudioStream, ChannelReceiver, I16_MAX_F32};
 
-/// Main synth engine managing direct oscillators (monophonic drone architecture).
+/// Main synth engine managing direct oscillators (monophonic architecture).
 pub struct Engine {
     /// Array of 4 oscillators [Osc1(Sine), Osc2(Saw), Osc3(Square), Sub(Sine)]
     oscillators: [Oscillator; 4],
@@ -25,6 +26,15 @@ pub struct Engine {
 
     /// Moog Ladder Filter (4-pole lowpass with resonance)
     filter: MoogLadderFilter,
+
+    /// Filter cutoff LFO (Phase 3.5)
+    filter_lfo: LFO,
+
+    /// Base filter cutoff from pot (before LFO modulation)
+    base_cutoff: f32,
+
+    /// LFO modulation range in Hz (depth pot → Hz range)
+    lfo_cutoff_range: f32,
 
     /// Profiling: accumulated statistics (only compiled with 'profile' feature)
     #[cfg(feature = "profile")]
@@ -59,7 +69,7 @@ impl Engine {
                 {
                     let mut sub = Oscillator::new(Waveform::Square);
                     sub.set_frequency(FREQUENCY_MIN / 4.0); // Sub at -1 octave
-                    sub.set_level(0.5); // Full level (no pot control yet)
+                    sub.set_level(0.0); // Full level (no pot control yet)
                     sub
                 },
             ],
@@ -76,6 +86,12 @@ impl Engine {
                 crate::config::FILTER_CUTOFF_MIN,
                 crate::config::FILTER_RESONANCE_MIN,
             ),
+            filter_lfo: LFO::new(
+                crate::config::LFO_FREQUENCY_DEFAULT,
+                crate::config::LFO_DEPTH_DEFAULT,
+            ),
+            base_cutoff: crate::config::FILTER_CUTOFF_MIN,
+            lfo_cutoff_range: 0.0,
             #[cfg(feature = "profile")]
             profile_stats: ProfileStats {
                 buffer_count: 0,
@@ -151,11 +167,22 @@ impl Engine {
 
                 // === Phase 2: Filter Controls ===
                 Message::SetCutoff(freq) => {
-                    self.filter.set_cutoff(freq);
+                    self.base_cutoff = freq;
                 }
 
                 Message::SetResonance(q) => {
                     self.filter.set_resonance(q);
+                }
+
+                // === Phase 3.5: Filter LFO ===
+                Message::SetFilterLfoRate(rate) => {
+                    self.filter_lfo.set_frequency(rate);
+                }
+
+                Message::SetFilterLfoDepth(depth) => {
+                    self.filter_lfo.depth = depth;
+                    // Convert depth (0.0-1.0) to Hz range (±2 octaves = 4× multiplier)
+                    self.lfo_cutoff_range = self.base_cutoff * 3.0 * depth;
                 }
             }
         }
@@ -164,13 +191,18 @@ impl Engine {
     /// BUFFER RATE (~172 Hz): Update cached parameters once per buffer.
     ///
     /// Called before processing each DMA buffer to recalculate coefficients
-    /// that don't need audio-rate smoothing. Future: LFO/envelope modulation.
+    /// that don't need audio-rate smoothing. LFO modulation applied here.
     #[inline]
     fn update_buffer_parameters(&mut self) {
         // Oscillator parameters: No-op (level/pitch smoothed at audio rate for responsiveness)
         for osc in &mut self.oscillators {
             osc.update_parameters();
         }
+
+        // LFO modulation: tick at buffer rate, apply to filter cutoff
+        let lfo_value = self.filter_lfo.tick();
+        let modulated_cutoff = self.base_cutoff + (lfo_value * self.lfo_cutoff_range);
+        self.filter.set_cutoff(modulated_cutoff);
 
         // Filter coefficients: OPTIMIZED - smoothed at buffer rate (only parameter that works well here)
         self.filter.update_coefficients();

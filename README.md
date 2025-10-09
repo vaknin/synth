@@ -1,20 +1,19 @@
-# ESP32-S3 Drone Synthesizer
+# ESP32-S3 Prototype Synthesizer
 
 <p align="center">
   <img src="assets/image.png" alt="Synth Hardware" width="333">
 </p>
 
-**Pocket-portable monophonic drone synthesizer** for exploratory sound creation. Always-on continuous synthesis with real-time control, designed for completion.
+**Breadboard experimentation platform** for discovering what makes a great pocket synthesizer. Build everything, test everything, keep only the best. The goal is a pocket-portable synth where every knob counts—this MVP helps us figure out which features are worth the space.
 
-## Core Features
+## Current Features (MVP Testing)
 
-- **Always-on drone synthesis** - Sculpt and morph a living, breathing tone
-- **Triple oscillator** (Sine, Saw, Square) with independent detune
-- **Multi-mode filter** (LP/HP/BP blend) with self-oscillating resonance
-- **Professional audio** - 24-bit @ 44.1kHz, OPA1622 headphone amp (119dB SNR)
-- **16-bit ADC precision** - 6× ADS1115, 65,536 steps, silky-smooth control
-- **Live oscilloscope** - 1.5" OLED waveform visualization
-- **Battery powered** - 20+ hours runtime, USB-C charging
+- **4-oscillator architecture** - Sine, Saw, Square, Sub with independent mixing and detuning
+- **Moog ladder filter** - 4-pole lowpass with self-oscillating resonance
+- **Professional audio quality** - 16-bit @ 44.1kHz with clean signal path
+- **Dual-core architecture** - Core 0 for audio (PRO_CPU), Core 1 for control (APP_CPU)
+- **High-precision ADC** - ADS1115 modules, 16-bit resolution, multisampled
+- **Extensible control** - Modular pot architecture for testing up to 20+ parameters
 
 ## Quick Start
 
@@ -42,7 +41,9 @@
 
 ## Philosophy
 
-Engineer's instrument with full parameter control, no hidden behavior, precise and predictable. Progressive complexity - start with one oscillator, add layers when ready. Completion over perfection.
+**Prototype-driven design**: Build features on breadboard, play with them extensively, measure their musical value. Only the most inspiring and fun features will make it to the final pocket synth. Every pot needs to earn its space.
+
+**Engineering values**: Full parameter control, no hidden behavior, precise and predictable DSP. Professional audio quality even during prototyping—if it sounds good here, it'll sound great in the final device.
 
 ---
 

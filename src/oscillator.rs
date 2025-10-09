@@ -158,6 +158,7 @@ pub enum Waveform {
 ///
 /// Reference: Välimäki & Huovilainen (2007) "Antialiasing Oscillators"
 #[inline]
+#[allow(dead_code)]
 fn poly_blep(phase: f32, phase_inc: f32, phase_inc_reciprocal: f32) -> f32 {
     // Forward discontinuity (0 < phase < phase_inc)
     if phase < phase_inc {

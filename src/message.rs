@@ -35,4 +35,12 @@ pub enum Message {
 
     /// Set filter resonance (0.0-10.0, mapped from pot)
     SetResonance(f32),
+
+    // === Phase 3.5: Filter LFO ===
+
+    /// Set filter cutoff LFO rate in Hz (0.01-10.0 Hz exponential)
+    SetFilterLfoRate(f32),
+
+    /// Set filter cutoff LFO depth (0.0-1.0)
+    SetFilterLfoDepth(f32),
 }

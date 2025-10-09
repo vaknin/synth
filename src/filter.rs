@@ -76,25 +76,35 @@ impl MoogLadderFilter {
 
     /// Set cutoff frequency in Hz.
     ///
+    /// Only marks dirty if value changed (prevents redundant tan() calculations).
+    ///
     /// # Arguments
     /// * `freq` - Cutoff frequency in Hz (20-20000 Hz, full audible range)
     #[inline(always)]
     pub fn set_cutoff(&mut self, freq: f32) {
-        self.cutoff = freq.clamp(
+        let new_cutoff = freq.clamp(
             crate::config::FILTER_CUTOFF_MIN,
             crate::config::FILTER_CUTOFF_MAX,
         );
-        self.dirty = true; // Mark for coefficient recalculation (pot deadband handles tiny changes)
+        if new_cutoff != self.cutoff {
+            self.cutoff = new_cutoff;
+            self.dirty = true;
+        }
     }
 
     /// Set resonance amount.
+    ///
+    /// Only marks dirty if value changed (prevents redundant coefficient recalculation).
     ///
     /// # Arguments
     /// * `resonance` - Resonance (0.1-10.0, saturated feedback prevents instability)
     #[inline(always)]
     pub fn set_resonance(&mut self, resonance: f32) {
-        self.resonance = resonance.clamp(FILTER_RESONANCE_MIN, FILTER_RESONANCE_MAX);
-        self.dirty = true; // Mark for coefficient recalculation (pot deadband handles tiny changes)
+        let new_resonance = resonance.clamp(FILTER_RESONANCE_MIN, FILTER_RESONANCE_MAX);
+        if new_resonance != self.resonance {
+            self.resonance = new_resonance;
+            self.dirty = true;
+        }
     }
 
     /// Update filter coefficients from direct parameters.
