@@ -1,6 +1,12 @@
 //! Centralized configuration constants for the synth.
 //! All magic numbers should live here to ensure consistency.
 
+// === System Architecture ===
+
+/// Stack size for Core 1 (APP_CPU) - Embassy executor + ADC polling task.
+/// 4KB provides headroom for current 6-pot system (~2.5KB) and future 20-pot expansion (~3.5KB).
+pub const APP_CORE_STACK_SIZE: usize = 4096; //4096 is a pretty good/safe value
+
 // === Synth Engine ===
 
 /// Number of simultaneously mixable voices.
@@ -52,7 +58,7 @@ pub const POLYBLEP_THRESHOLD_PHASE_INC: f32 = POLYBLEP_THRESHOLD_HZ / 44100.0;
 
 /// Master output gain applied after voice mixing (0.0 to 1.0).
 /// Provides headroom even when all voices are at max volume (0.95 ≈ -0.45 dB).
-pub const MASTER_GAIN: f32 = 0.75;
+pub const MASTER_GAIN: f32 = 0.85;
 
 // === Wavetable ===
 
@@ -119,7 +125,7 @@ pub const POT_CHANGE_THRESHOLD: f32 = 0.0005;
 pub const POT_EXPONENT_SCALE: i32 = 2;
 
 /// Minimum frequency target for potentiometer control (Hz).
-pub const FREQUENCY_MIN: f32 = 27.5;
+pub const FREQUENCY_MIN: f32 = 4.0;
 
 /// Maximum frequency target for potentiometer control (Hz).
 pub const FREQUENCY_MAX: f32 = 768.0;

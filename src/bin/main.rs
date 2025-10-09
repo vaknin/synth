@@ -25,19 +25,9 @@ esp_bootloader_esp_idf::esp_app_desc!();
 /// Global MPSC channel for control → audio communication (Core 1 → Core 0)
 static CHANNEL: SynthChannel = Channel::new();
 
-/// Stack for Core 1 (APP_CPU) - ADC polling task
-///
-/// Size: 8KB (8192 bytes), 16-byte aligned per XTensa LX7 requirements
-///
-/// Stack budget breakdown (for ~20 pots):
-/// - Potentiometer state: 20 × ~40 bytes = ~800 bytes
-/// - ADC pin array + bus: ~200 bytes
-/// - Embassy executor overhead: ~1-2 KB
-/// - Function call frames + locals: ~500 bytes
-/// - Safety margin for interrupts/debug: ~4-5 KB
-///
-/// Total: ~2.5-3.5 KB used, 4.5-5.5 KB headroom (well-sized, not wasteful)
-static mut APP_CORE_STACK: Stack<8192> = Stack::new();
+/// Stack for Core 1 (APP_CPU) - ADC polling task.
+/// 16-byte aligned per XTensa LX7 requirements.
+static mut APP_CORE_STACK: Stack<APP_CORE_STACK_SIZE> = Stack::new();
 
 #[esp_hal_embassy::main]
 async fn main(_spawner: Spawner) {

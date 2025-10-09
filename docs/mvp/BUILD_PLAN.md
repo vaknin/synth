@@ -582,12 +582,25 @@ pub fn map_lfo_depth(normalized: f32) -> f32 {
 - [ ] Implement Reverb (4-tap FDN algorithm with mix control)
 
 **Display Integration:**
-- [ ] Wire SSD1351 OLED to SPI bus (GPIO pins TBD based on I2S/ADC assignments)
+- [ ] Wire SSD1351 OLED (128×128 RGB) to SPI bus (GPIO pins TBD based on I2S/ADC assignments)
+- [ ] Add GPIO button for mode toggle (Solo ↔ Final Mix)
 - [ ] Integrate embedded-graphics crate for display rendering
-- [ ] Implement oscilloscope waveform visualization (128 pixels wide)
-- [ ] Implement parameter overlay display (shows control name + value)
-- [ ] Add 2-second fade timer for overlay (returns to pure waveform view)
-- [ ] Optimize SPI refresh rate for 30+ FPS without audio glitches
+- [ ] **Solo Mode:** 4 overlaid color-coded oscillator traces (all X: 0→128)
+  - Osc1 (Sine): Cyan `0x07FF`
+  - Osc2 (Saw): Magenta `0xF81F`
+  - Osc3 (Square): Yellow `0xFFE0`
+  - Sub (Sine -1oct): Green `0x07E0`
+  - Skip trace if `osc.level <= OSC_SILENCE_THRESHOLD`
+- [ ] **Final Mix Mode:** Single trace showing filter output, Y=0 center line (samples normalized [-1, 1])
+- [ ] Implement parameter overlay (control name + value, 2-second fade to waveform-only view)
+- [ ] **Sample capture architecture (buffer-rate sending, keeps audio hot path clean):**
+  - Audio rate (`render_sample()`): Accumulate oscillator outputs locally (downsample 11:1 → ~4kHz)
+  - Buffer rate (`update_buffer_parameters()`): Send 128-sample batch via `heapless::spsc::Queue`
+  - Local buffer: `[[f32; 128]; 4]` = 2KB RAM (no cross-core overhead in hot path)
+  - SPSC queue: `Queue<[[f32; 128]; 4], 2>` = 4KB ring buffer (172 sends/sec, 5.7× display refresh rate)
+  - **Performance**: Buffer-rate sending = 23× fewer cross-core ops than audio-rate (172 vs 4000/sec)
+- [ ] Display task on Core 1 with DMA SPI transfers (target 30 FPS, zero audio impact)
+- [ ] Framebuffer: 128×128×2 bytes = 32KB RAM (double-buffer optional for smoother rendering)
 
 **Control Expansion:**
 - [ ] Wire additional ADS1115 modules for remaining pots (controls 8-18)
