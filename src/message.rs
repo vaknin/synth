@@ -16,8 +16,6 @@ pub enum OscillatorId {
 /// Messages sent from control tasks (buttons, pots, encoders) to audio task.
 #[derive(Debug, Clone, Copy)]
 pub enum Message {
-    // === Phase 1: Oscillator Controls ===
-
     /// Set master pitch for all oscillators (30Hz-1024Hz, exponential mapping)
     SetMasterPitch(f32),
 
@@ -28,15 +26,11 @@ pub enum Message {
     /// Note: Only Osc2, Osc3, and Sub support detuning
     SetOscDetune(OscillatorId, f32),
 
-    // === Phase 2: Filter Controls ===
-
     /// Set filter cutoff frequency (Hz, mapped from pot)
     SetCutoff(f32),
 
     /// Set filter resonance (0.0-10.0, mapped from pot)
     SetResonance(f32),
-
-    // === Phase 3.5: Filter LFO ===
 
     /// Set filter cutoff LFO rate in Hz (0.01-10.0 Hz exponential)
     SetFilterLfoRate(f32),

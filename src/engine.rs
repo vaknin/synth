@@ -27,7 +27,7 @@ pub struct Engine {
     /// Moog Ladder Filter (4-pole lowpass with resonance)
     filter: MoogLadderFilter,
 
-    /// Filter cutoff LFO (Phase 3.5)
+    /// Filter cutoff LFO
     filter_lfo: LFO,
 
     /// Base filter cutoff from pot (before LFO modulation)
@@ -129,7 +129,6 @@ impl Engine {
     fn consume_messages(&mut self) {
         while let Ok(msg) = self.consumer.try_receive() {
             match msg {
-                // === Phase 1: Oscillator Controls ===
                 Message::SetMasterPitch(freq) => {
                     self.set_master_pitch(freq);
                 }
@@ -165,7 +164,6 @@ impl Engine {
                     }
                 }
 
-                // === Phase 2: Filter Controls ===
                 Message::SetCutoff(freq) => {
                     self.base_cutoff = freq;
                 }
@@ -174,7 +172,6 @@ impl Engine {
                     self.filter.set_resonance(q);
                 }
 
-                // === Phase 3.5: Filter LFO ===
                 Message::SetFilterLfoRate(rate) => {
                     self.filter_lfo.set_frequency(rate);
                 }

@@ -1,8 +1,16 @@
 ---
 description: "Deep optimization pass for embedded audio performance"
+argument-hint: [optional: @file or @file identifier]
 ---
 
-Please perform a comprehensive optimization review of the code, with special focus on embedded constraints (ESP32-S3 dual-core XTensa LX7):
+Please perform a comprehensive optimization review$ARGUMENTS of the code, with special focus on embedded constraints (ESP32-S3 dual-core XTensa LX7):
+
+**Scope**:
+- If no target specified: Analyze the entire codebase for optimization opportunities
+- If only a file specified (e.g., `@src/engine.rs`): Focus optimization analysis on that file
+- If file + identifier specified (e.g., `@src/engine.rs render_sample`): Focus specifically on that function/method/struct
+
+**Analysis Framework**:
 
 1. **Algorithm Research**: Search for state-of-the-art algorithms and optimization techniques related to the current implementation. Are there more efficient approaches used in professional audio DSP?
 
@@ -19,5 +27,3 @@ Please perform a comprehensive optimization review of the code, with special foc
 7. **Memory & Allocation**: Verify no heap allocations occur in audio callbacks. Check for unnecessary copies or large stack frames.
 
 Provide specific optimizations with before/after code examples and estimated performance impact.
-
-$ARGUMENTS

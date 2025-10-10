@@ -11,7 +11,7 @@ use embassy_time::{Duration, Timer};
 /// Owns the ADC peripheral and all pot pins. Each pot has independent
 /// signal processing state (EMA filter, deadband) but shares the hardware.
 ///
-/// Current 8-pot setup (Phase 3.5):
+/// Current 8-pot setup:
 /// - Pot 0 (GPIO1): Master Pitch
 /// - Pot 1 (GPIO2): Osc1 Level
 /// - Pot 2 (GPIO3): Osc2 Detune

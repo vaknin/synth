@@ -12,6 +12,16 @@
 - Always use modern and idiomatic Rust
 - Hot path optimization is critical: use `#[inline]` on small, frequently-called functions (audio callback @ 44.1kHz)
 
+# Design Priorities
+
+When making trade-offs, prioritize in this order:
+
+1. **Portability** - Keep it pocket-portable
+2. **User Experience** - Fun, creative, exciting to use
+3. **Audio Quality** - Sound quality matters
+4. **CPU Budget** - Optimize when needed; we can find creative algorithms
+5. **Cost** - Budget-conscious component choices
+
 # Guidelines
 - Always build with ./scripts/build.sh
 - When adding new crates, make sure they're the latest version possible

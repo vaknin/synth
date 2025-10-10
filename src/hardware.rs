@@ -22,11 +22,11 @@ pub type Adc1 = Adc<'static, ADC1<'static>, Blocking>;
 // I2S peripheral type aliases (for audio setup)
 type I2s0Peripheral = esp_hal::peripherals::I2S0<'static>;
 type DmaChannel0 = esp_hal::peripherals::DMA_CH0<'static>;
-type Gpio33 = esp_hal::peripherals::GPIO33<'static>;
-type Gpio34 = esp_hal::peripherals::GPIO34<'static>;
-type Gpio35 = esp_hal::peripherals::GPIO35<'static>;
+type Gpio47 = esp_hal::peripherals::GPIO47<'static>;
+type Gpio48 = esp_hal::peripherals::GPIO48<'static>;
+type Gpio45 = esp_hal::peripherals::GPIO45<'static>;
 
-// GPIO type aliases for ADC pins (Phase 3.5: 8 pots)
+// GPIO type aliases for ADC pins (8 pots)
 type GPIO1 = peripherals::GPIO1<'static>;
 type GPIO2 = peripherals::GPIO2<'static>;
 type GPIO3 = peripherals::GPIO3<'static>;
@@ -54,18 +54,18 @@ adc_pins! {
 /// sets up circular DMA transfer, and returns transaction ready for push_with().
 ///
 /// # Pin Configuration (Non-ADC GPIOs)
-/// - BCK (bit clock) => GPIO33
-/// - LRCK (word select) => GPIO34
-/// - DATA (data out) => GPIO35
+/// - BCK (bit clock) => GPIO47
+/// - LRCK (word select) => GPIO48
+/// - DATA (data out) => GPIO45
 ///
-/// GPIO33-35 have no ADC capability, freeing GPIO7-9 for future pot expansion.
+/// GPIO 47/48/45 have no ADC capability and don't conflict with I2C/SPI peripherals.
 ///
 /// # Arguments
 /// * `i2s0` - I2S0 peripheral
 /// * `dma_channel` - DMA channel for circular buffer
-/// * `gpio33` - BCLK pin
-/// * `gpio34` - WS pin
-/// * `gpio35` - DOUT pin
+/// * `gpio47` - BCLK pin
+/// * `gpio48` - WS pin
+/// * `gpio45` - DOUT pin
 /// * `tx_buffer` - DMA transmit buffer (from dma_circular_buffers! macro)
 /// * `tx_descriptors` - DMA descriptors (from dma_circular_buffers! macro)
 ///
@@ -74,9 +74,9 @@ adc_pins! {
 pub fn setup_audio(
     i2s0: I2s0Peripheral,
     dma_channel: DmaChannel0,
-    gpio33: Gpio33,
-    gpio34: Gpio34,
-    gpio35: Gpio35,
+    gpio47: Gpio47,
+    gpio48: Gpio48,
+    gpio45: Gpio45,
     tx_buffer: &'static mut [u8],
     tx_descriptors: &'static mut [DmaDescriptor],
 ) -> AudioStream {
@@ -89,9 +89,9 @@ pub fn setup_audio(
     )
     .into_async()
     .i2s_tx
-    .with_bclk(gpio33)
-    .with_ws(gpio34)
-    .with_dout(gpio35)
+    .with_bclk(gpio47)
+    .with_ws(gpio48)
+    .with_dout(gpio45)
     .build(tx_descriptors);
 
     i2s_tx.write_dma_circular_async(tx_buffer).unwrap()

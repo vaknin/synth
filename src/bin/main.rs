@@ -86,13 +86,13 @@ async fn main(_spawner: Spawner) {
         .unwrap();
 
     // Core 0 (PRO_CPU) continues here - initialize audio hardware
-    // I2S moved to GPIO33/34/35 to free GPIO7/8/9 for ADC expansion
+    // I2S on GPIO47/48/45 to avoid conflicts with ADC, I2C, SPI
     let mut audio_stream: AudioStream = hardware::setup_audio(
         peripherals.I2S0,
         dma_channel,
-        peripherals.GPIO33,
-        peripherals.GPIO34,
-        peripherals.GPIO35,
+        peripherals.GPIO47,
+        peripherals.GPIO48,
+        peripherals.GPIO45,
         tx_buffer,
         tx_descriptors,
     );
