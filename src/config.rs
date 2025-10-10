@@ -17,6 +17,11 @@ pub const VOICE_COUNT: usize = 3;
 /// 44.1 kHz keeps compatibility with consumer audio equipment.
 pub const SAMPLE_RATE: u32 = 44_100;
 
+/// Buffer callback rate in Hz (DMA interrupt frequency).
+/// Each stereo frame = 4 bytes (2 channels × 2 bytes per i16 sample).
+/// Calculated as: SAMPLE_RATE / (DMA_BUFFER_SIZE / 4)
+pub const BUFFER_RATE: f32 = SAMPLE_RATE as f32 / (DMA_BUFFER_SIZE / 4) as f32;
+
 /// Universal parameter smoothing coefficient (0.0 to 1.0).
 /// Used for all time-varying parameters (frequency, volume, filters, etc.)
 /// Higher values = more smoothing = slower response. Prevents clicks and zipper noise.
@@ -187,3 +192,12 @@ pub const LFO_FREQUENCY_DEFAULT: f32 = 0.1;
 /// Default LFO depth on initialization (0.0-1.0).
 /// Zero depth = no modulation until pot message arrives.
 pub const LFO_DEPTH_DEFAULT: f32 = 0.0;
+
+// === Generative Synthesis ===
+
+/// Minimum octave range for generative voices (smoother, stepwise motion).
+pub const GENERATIVE_OCTAVE_RANGE_MIN: f32 = 1.0;
+
+/// Maximum octave range for generative voices (dramatic, wide jumps).
+/// Determines lookup table size: ±(MAX × 12 semitones) = ±48 semitones.
+pub const GENERATIVE_OCTAVE_RANGE_MAX: f32 = 4.0;
