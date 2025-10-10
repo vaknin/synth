@@ -201,3 +201,62 @@ pub const GENERATIVE_OCTAVE_RANGE_MIN: f32 = 1.0;
 /// Maximum octave range for generative voices (dramatic, wide jumps).
 /// Determines lookup table size: ±(MAX × 12 semitones) = ±48 semitones.
 pub const GENERATIVE_OCTAVE_RANGE_MAX: f32 = 4.0;
+
+// === Turing Machine ===
+
+/// Minimum loop length in bits for Turing Machine shift register.
+/// 2 bits = ultra-fast melodic cells (4 possible states).
+pub const TURING_LOOP_LENGTH_MIN: usize = 2;
+
+/// Maximum loop length in bits for Turing Machine shift register.
+/// 32 bits = very long evolving sequences before repeat.
+pub const TURING_LOOP_LENGTH_MAX: usize = 32;
+
+/// Default loop length on initialization (bits).
+/// 16 bits = medium-length melodic phrases.
+pub const TURING_LOOP_LENGTH_DEFAULT: usize = 16;
+
+/// Maximum mutation rate (probability per step, 0.0-0.5).
+/// 0.5 = 50% chance to flip each bit (maximum useful chaos).
+pub const TURING_MUTATION_MAX: f32 = 0.5;
+
+/// Default mutation rate on initialization.
+/// 0.05 = 5% mutation (slowly evolving, mostly stable).
+pub const TURING_MUTATION_DEFAULT: f32 = 0.05;
+
+// === Master Clock ===
+
+/// Minimum tempo in beats per minute.
+/// 80 BPM = deep techno, ambient territory.
+pub const CLOCK_BPM_MIN: f32 = 80.0;
+
+/// Maximum tempo in beats per minute.
+/// 180 BPM = fast techno, high-energy performance.
+pub const CLOCK_BPM_MAX: f32 = 180.0;
+
+/// Default tempo on initialization (BPM).
+/// 120 BPM = standard dance music tempo.
+pub const CLOCK_BPM_DEFAULT: f32 = 120.0;
+
+/// Clock step resolution (steps per beat).
+/// 4 = 16th notes (standard for techno/electronic rhythms).
+/// Change to 2 for 8th notes, 1 for quarter notes.
+pub const CLOCK_STEPS_PER_BEAT: usize = 4;
+
+/// Tempo slew time in milliseconds.
+/// Time to smoothly transition between BPM values.
+/// 500ms = responsive but smooth tempo changes for live performance.
+pub const CLOCK_TEMPO_SLEW_MS: f32 = 500.0;
+
+// === Envelope ===
+
+/// Envelope attack time in milliseconds (fixed).
+/// Fast attack for percussive, punchy articulation.
+pub const ENVELOPE_ATTACK_MS: f32 = 5.0;
+
+/// Default envelope decay time in milliseconds.
+/// Used for bass and lead voices - tight, punchy decay.
+pub const ENVELOPE_DEFAULT_DECAY_MS: f32 = 80.0;
+
+/// Minimum envelope decay time in milliseconds.
+pub const ENVELOPE_MIN_DECAY_MS: f32 = 10.0;

@@ -23,5 +23,7 @@
 - Build: `./scripts/build.sh`
 - Crates: Use latest versions
 - Code style: Elegant, efficient, public fields over getters
+- Collaboration: Write code incrementally (function/struct-length), not full files - user wants ownership
 - Questions: Number them, attach recommendations (based on audio/hardware best practices)
 - Comments: Only when strictly needed, concise
+- Where possible and necessary, run python code to verify the algorithm/calculation is correct

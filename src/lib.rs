@@ -9,15 +9,21 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex as ChannelMutex;
 #[macro_use]
 mod macros;
 
+pub mod clock;
 pub mod config;
 pub mod controls;
 pub mod engine;
+pub mod envelope;
+pub mod euclidean;
 pub mod filter;
 pub mod hardware;
 pub mod lfo;
 pub mod message;
+pub mod noise;
 pub mod oscillator;
+pub mod quantizer;
 pub mod slew;
+pub mod turing;
 
 // Re-export paste for use in generated macros
 #[doc(hidden)]
