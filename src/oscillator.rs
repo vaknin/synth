@@ -1,6 +1,6 @@
 use crate::config::{
-    CENTS_TO_OCTAVES, FREQUENCY_MIN, OSC_SILENCE_THRESHOLD, SAMPLE_RATE, WAVETABLE_MASK,
-    WAVETABLE_SIZE_F32,
+    CENTS_TO_OCTAVES, FREQUENCY_MIN, OSC_SILENCE_THRESHOLD, POLYBLEP_THRESHOLD_PHASE_INC,
+    PORTAMENTO_SMOOTHING_COEFF, SAMPLE_RATE, WAVETABLE_MASK, WAVETABLE_SIZE_F32,
 };
 use crate::slew::Slew;
 use micromath::F32Ext;
@@ -157,19 +157,18 @@ pub enum Waveform {
 /// Correction residual to subtract from naive waveform
 ///
 /// Reference: Välimäki & Huovilainen (2007) "Antialiasing Oscillators"
-#[inline]
-#[allow(dead_code)]
+#[inline(always)]
 fn poly_blep(phase: f32, phase_inc: f32, phase_inc_reciprocal: f32) -> f32 {
     // Forward discontinuity (0 < phase < phase_inc)
     if phase < phase_inc {
         let t = phase * phase_inc_reciprocal; // Multiply by reciprocal instead of divide
-                                              // Polynomial: 2t - t² - 1
+        // Polynomial: 2t - t² - 1
         t + t - t * t - 1.0
     }
     // Backward discontinuity (1 - phase_inc < phase < 1)
     else if phase > 1.0 - phase_inc {
         let t = (phase - 1.0) * phase_inc_reciprocal; // Multiply by reciprocal instead of divide
-                                                      // Polynomial: t² + 2t + 1
+        // Polynomial: t² + 2t + 1
         t * t + t + t + 1.0
     }
     // No discontinuity nearby
@@ -217,12 +216,12 @@ impl Oscillator {
         let phase_inc = frequency / sample_rate;
         Self {
             phase: 0.0,
-            phase_increment: Slew::new(phase_inc),
+            phase_increment: Slew::with_coeff(phase_inc, PORTAMENTO_SMOOTHING_COEFF),
             frequency,
             sample_rate,
             waveform,
-            level: Slew::new(0.0), // Start silent - Engine will set active oscillator levels
-            detune_ratio: 1.0,     // No detune by default
+            level: Slew::new(1.0),
+            detune_ratio: 1.0, // No detune by default
         }
     }
 
@@ -270,6 +269,17 @@ impl Oscillator {
         self.update_phase_increment();
     }
 
+    /// Set portamento smoothing coefficient (controls pitch glide speed).
+    ///
+    /// # Arguments
+    /// * `coeff` - Smoothing coefficient (clamped to PORTAMENTO_COEFF_MIN..MAX)
+    #[inline]
+    pub fn set_portamento_coeff(&mut self, coeff: f32) {
+        use crate::config::{PORTAMENTO_COEFF_MIN, PORTAMENTO_COEFF_MAX};
+        let clamped = coeff.clamp(PORTAMENTO_COEFF_MIN, PORTAMENTO_COEFF_MAX);
+        self.phase_increment.set_coeff(clamped);
+    }
+
     /// Update smoothed parameters (call once per buffer, not per sample).
     ///
     /// Currently a no-op - both frequency and level smoothed at audio rate in tick().
@@ -293,18 +303,15 @@ impl Oscillator {
         // Huge performance win when oscillators are at zero level (common in mix scenarios)
         // Still advance phase to keep oscillator synchronized
         let level = self.level.value();
+        let phase_inc = self.phase_increment.value();
         if level < OSC_SILENCE_THRESHOLD {
             // Advance phase to stay in sync (cheap: just add + branch)
-            let phase_inc = self.phase_increment.value();
             self.phase += phase_inc;
             if self.phase >= 1.0 {
                 self.phase -= 1.0;
             }
             return 0.0;
         }
-
-        // Smooth frequency at audio rate (~10ms response, settled optimization makes it cheap)
-        let phase_inc = self.phase_increment.value();
 
         // Advance phase (normalized [0.0, 1.0) range)
         self.phase += phase_inc;
@@ -331,31 +338,34 @@ impl Oscillator {
             }
             Waveform::Saw => {
                 // Naive sawtooth: ramp from -1 to +1
-                (self.phase * 2.0) - 1.0
+                let naive = (self.phase * 2.0) - 1.0;
 
-                // PolyBLEP DISABLED: Testing performance without anti-aliasing
-                // Max frequency (768 Hz) produces first alias at -29dB (inaudible)
-                // Enabling PolyBLEP adds branching + division overhead for minimal benefit
-                //
-                // TO RE-ENABLE: Uncomment below, comment out naive return above
-                // if phase_inc < POLYBLEP_THRESHOLD_PHASE_INC {
-                //     naive
-                // } else {
-                //     naive - poly_blep(self.phase, phase_inc, phase_inc_reciprocal)
-                // }
+                // PolyBLEP anti-aliasing: only above 1000 Hz (bass always skips)
+                // Bass: 65-184 Hz → always takes fast path (no reciprocal division)
+                // Lead: 260-2080 Hz → applies PolyBLEP only when pitch > 1000 Hz
+                if phase_inc < POLYBLEP_THRESHOLD_PHASE_INC {
+                    naive  // Fast path: no anti-aliasing needed
+                } else {
+                    // Compute reciprocal only when needed (avoid division on bass voice)
+                    let phase_inc_reciprocal = 1.0 / phase_inc;
+                    naive - poly_blep(self.phase, phase_inc, phase_inc_reciprocal)
+                }
             }
             Waveform::Square => {
                 // Naive square wave: -1 or +1
-                if self.phase < 0.5 {
-                    1.0
-                } else {
-                    -1.0
-                }
+                let naive = if self.phase < 0.5 { 1.0 } else { -1.0 };
 
-                // PolyBLEP DISABLED: No audible difference even at extreme settings
-                // Tested at max freq (768 Hz) × max detune (4×) = 3072 Hz
-                // Aliasing is present but contributes to the "character" of harsh square waves
-                // Keeping code simple and fast (saves ~15-20 cycles per sample when active)
+                // PolyBLEP anti-aliasing: smooth both rising and falling edges
+                // Same threshold optimization as Saw (bass always skips for performance)
+                if phase_inc < POLYBLEP_THRESHOLD_PHASE_INC {
+                    naive  // Fast path: no anti-aliasing needed
+                } else {
+                    let phase_inc_reciprocal = 1.0 / phase_inc;
+                    // Apply correction at both 0.0 (rising edge) and 0.5 (falling edge)
+                    naive
+                        - poly_blep(self.phase, phase_inc, phase_inc_reciprocal)
+                        + poly_blep((self.phase + 0.5) % 1.0, phase_inc, phase_inc_reciprocal)
+                }
             }
         };
 

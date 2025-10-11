@@ -3,7 +3,10 @@
 //! Runs at audio rate (44.1 kHz) for smooth amplitude control.
 //! Optimized for minimal CPU cost (~8 cycles/sample).
 
-use crate::config::SAMPLE_RATE;
+use crate::config::SAMPLE_RATE_F32;
+
+/// Samples per millisecond (pre-computed to eliminate division).
+const SAMPLES_PER_MS: f32 = SAMPLE_RATE_F32 / 1000.0;
 
 /// Envelope stages for state machine.
 #[derive(PartialEq)]
@@ -30,16 +33,14 @@ pub struct ADEnvelope {
 impl ADEnvelope {
     /// Create new envelope with fixed attack and decay times from config.
     pub fn new() -> Self {
-        let sample_rate = SAMPLE_RATE as f32;
-
         // Attack time from config (e.g., 5ms)
         let attack_ms = crate::config::ENVELOPE_ATTACK_MS;
-        let attack_samples = (attack_ms / 1000.0 * sample_rate) as f32;
+        let attack_samples = attack_ms * SAMPLES_PER_MS;
         let attack_increment = 1.0 / attack_samples;
 
         // Decay time from config
         let decay_ms = crate::config::ENVELOPE_DEFAULT_DECAY_MS;
-        let decay_samples = (decay_ms / 1000.0 * sample_rate) as f32;
+        let decay_samples = decay_ms * SAMPLES_PER_MS;
         let decay_increment = 1.0 / decay_samples;
 
         Self {
@@ -54,6 +55,16 @@ impl ADEnvelope {
     pub fn trigger(&mut self) {
         self.stage = EnvelopeStage::Attack;
         self.level = 0.0;
+    }
+
+    /// Set decay time dynamically (for envelope randomization).
+    ///
+    /// # Arguments
+    /// * `decay_ms` - Decay time in milliseconds
+    #[inline]
+    pub fn set_decay_ms(&mut self, decay_ms: f32) {
+        let decay_samples = decay_ms * SAMPLES_PER_MS;
+        self.decay_increment = 1.0 / decay_samples;
     }
 
     /// Process one sample (AUDIO RATE 44.1 kHz).

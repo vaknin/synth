@@ -42,10 +42,7 @@ pub enum Message {
     /// Set global tempo in BPM
     SetTempo(f32),
 
-    /// Set bass Euclidean pattern length in steps
-    SetBassEuclideanLength(usize),
-
-    /// Set bass Euclidean hits (0 = mute)
+    /// Set bass Euclidean hits (0 = mute, length fixed)
     SetBassEuclideanHits(usize),
 
     /// Set lead Euclidean pattern length in steps
@@ -56,4 +53,7 @@ pub enum Message {
 
     /// Set Turing Machine mutation rate (shared for both voices)
     SetMutationRate(f32),
+
+    /// Set portamento smoothing coefficient (0.95-0.998, shared for all voices)
+    SetPortamento(f32),
 }

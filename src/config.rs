@@ -17,6 +17,9 @@ pub const VOICE_COUNT: usize = 2;
 /// 44.1 kHz keeps compatibility with consumer audio equipment.
 pub const SAMPLE_RATE: u32 = 44_100;
 
+/// Sample rate as f32 (pre-computed to avoid runtime casts).
+pub const SAMPLE_RATE_F32: f32 = SAMPLE_RATE as f32;
+
 /// Buffer callback rate in Hz (DMA interrupt frequency).
 /// Each stereo frame = 4 bytes (2 channels × 2 bytes per i16 sample).
 /// Calculated as: SAMPLE_RATE / (DMA_BUFFER_SIZE / 4)
@@ -27,6 +30,19 @@ pub const BUFFER_RATE: f32 = SAMPLE_RATE as f32 / (DMA_BUFFER_SIZE / 4) as f32;
 /// Higher values = more smoothing = slower response. Prevents clicks and zipper noise.
 /// 0.99 provides ~10ms settling time at 44.1kHz - settles within pot update interval (20ms).
 pub const SMOOTHING_COEFF: f32 = 0.99;
+
+/// Default portamento smoothing coefficient for oscillator pitch transitions.
+/// Slower than SMOOTHING_COEFF for expressive, vocal-like melodic glides.
+/// 0.995 provides ~50ms settling time at 44.1kHz for smooth generative melodies.
+pub const PORTAMENTO_SMOOTHING_COEFF: f32 = 0.995;
+
+/// Minimum portamento smoothing coefficient (fast transitions).
+/// 0.95 provides ~10ms settling time for snappy, percussive melodies.
+pub const PORTAMENTO_COEFF_MIN: f32 = 0.95;
+
+/// Maximum portamento smoothing coefficient (slow transitions).
+/// 0.998 provides ~150ms settling time for vocal-like, legato phrases.
+pub const PORTAMENTO_COEFF_MAX: f32 = 0.998;
 
 /// Slew limiter settling threshold (amplitude units).
 /// When error between current and target falls below this threshold, snap to target and mark settled.
@@ -69,7 +85,7 @@ pub const MASTER_GAIN: f32 = 0.90;
 /// Values > 1.0 push signals into compression zone for analog-style warmth.
 /// 1.0 = clean (no extra drive), 2.0-3.0 = fat bass, 4.0+ = aggressive distortion.
 /// Applied before soft_clip() to add harmonic richness and thickness.
-pub const SATURATION_DRIVE: f32 = 2.5;
+pub const SATURATION_DRIVE: f32 = 1.8;
 
 // === Wavetable ===
 
@@ -179,7 +195,7 @@ pub const FILTER_RESONANCE_MIN: f32 = 0.1;
 /// 4.0 enables classic Moog self-oscillation - the "sweet spot" before harsh distortion.
 /// At k≈4.0, loop gain reaches unity and filter whistles musically.
 /// Higher values overdrive the feedback path, losing the characteristic Moog tone.
-pub const FILTER_RESONANCE_MAX: f32 = 1.0;
+pub const FILTER_RESONANCE_MAX: f32 = 4.0;
 
 /// Denormal prevention threshold for filter state variables.
 /// Zeros out filter state when it decays below this value to prevent FPU slowdown.
@@ -217,28 +233,37 @@ pub const GENERATIVE_OCTAVE_RANGE_MAX: f32 = 4.0;
 
 // === Voice Architecture ===
 
-/// Bass voice root frequency (A1 - classic techno sub-bass territory).
-/// 55 Hz provides deep bass that translates well on club systems.
-pub const BASS_ROOT_HZ: f32 = 55.0;
+/// Octave multiplier (one octave = 2× frequency).
+pub const OCTAVE_MULTIPLIER: f32 = 2.0;
+
+/// Two octaves separation for harmonic voice alignment.
+pub const TWO_OCTAVES: f32 = OCTAVE_MULTIPLIER * OCTAVE_MULTIPLIER;
+
+/// Bass voice root frequency (C2 - deep but audible bass territory).
+/// 65 Hz balances sub-bass power with melodic clarity and speaker translation.
+pub const BASS_ROOT_HZ: f32 = 65.0;
 
 /// Bass voice octave range (controlled melodic movement).
 /// 1.5 octaves keeps bass low and tight while allowing melodic variation.
 pub const BASS_OCTAVE_RANGE: f32 = 1.5;
 
-/// Lead voice root frequency (E4 - bright melodic register).
-/// 330 Hz cuts through mix and provides energetic melodic content.
-pub const LEAD_ROOT_HZ: f32 = 330.0;
+/// Lead voice root frequency (C4 - 2 octaves above bass for harmonic alignment).
+/// Both voices share same root note (C) for consonant polyrhythmic interplay.
+pub const LEAD_ROOT_HZ: f32 = BASS_ROOT_HZ * TWO_OCTAVES;
 
 /// Lead voice octave range (dramatic melodic jumps).
 /// 3.0 octaves enables wide, expressive lead melodies.
 pub const LEAD_OCTAVE_RANGE: f32 = 3.0;
 
 /// Initial euclidean hits (immediately overwritten by pot ADC values).
-/// Set to 1 for safe, silent startup until pots are read (~20ms).
+/// Set to 1 for safe, silent startup until pots are read.
 pub const EUCLIDEAN_INITIAL_HITS: usize = 1;
 
-/// Initial euclidean length (immediately overwritten by pot ADC values).
-/// Set to 8 for safe rhythm initialization until pots are read (~20ms).
+/// Bass voice euclidean pattern length (fixed, no pot control).
+/// Standard 4/4 bar subdivision for solid rhythmic foundation.
+pub const BASS_EUCLIDEAN_LENGTH: usize = 8;
+
+/// Initial euclidean length for lead voice (overwritten by pot ADC).
 pub const EUCLIDEAN_INITIAL_LENGTH: usize = 8;
 
 // === Turing Machine ===
@@ -294,5 +319,13 @@ pub const CLOCK_TEMPO_SLEW_MS: f32 = 500.0;
 pub const ENVELOPE_ATTACK_MS: f32 = 5.0;
 
 /// Default envelope decay time in milliseconds.
-/// Used for bass and lead voices - tight, punchy decay.
-pub const ENVELOPE_DEFAULT_DECAY_MS: f32 = 80.0;
+/// Sustained decay for flowing generative melodies with overlapping phrases.
+pub const ENVELOPE_DEFAULT_DECAY_MS: f32 = 400.0;
+
+/// Minimum envelope decay time for randomization.
+/// Short end of dynamic decay range for rhythmic articulation.
+pub const ENVELOPE_DECAY_MIN_MS: f32 = 300.0;
+
+/// Maximum envelope decay time for randomization.
+/// Long end of dynamic decay range for sustained, pad-like phrases.
+pub const ENVELOPE_DECAY_MAX_MS: f32 = 600.0;

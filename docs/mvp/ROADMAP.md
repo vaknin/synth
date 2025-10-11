@@ -102,6 +102,23 @@ Oscillators → Envelope → Moog Filter → Delay → Output
 
 ---
 
+## Synthesis Tuning (2025-10-11)
+
+**Problem**: Generative algorithms perfect, but synthesis layer sounded choppy, weak, unmusical.
+
+**Fixes**:
+1. **Envelope decay**: 80ms → 400ms (notes were cutting off before next step at 120 BPM)
+2. **Filter resonance max**: 1.0 → 4.0 (unlocked Moog self-oscillation character)
+3. **Harmonic alignment**: Lead root 330 Hz → 220 Hz (4× bass root for octave relationship)
+4. **Saturation drive**: 2.5× → 1.8× (preserve dynamics, reduce compression)
+5. **Portamento**: ~10ms → ~50ms (smoother melodic transitions)
+
+**Key Learning**: Always verify synthesis layer matches generative algorithm's musical intent. Generative melodies need long decays (300-800ms), strong resonance, and harmonic anchoring—unlike percussive synthesis.
+
+**Deferred**: Envelope randomization more complex than estimated (requires ADEnvelope refactor). Consider for Phase 4.
+
+---
+
 ## Control Mapping
 
 ### Current Configuration (8 Pots - Wired)

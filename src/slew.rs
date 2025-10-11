@@ -73,6 +73,15 @@ impl Slew {
         }
     }
 
+    /// Set smoothing coefficient (controls slew rate).
+    ///
+    /// # Arguments
+    /// * `coeff` - Smoothing coefficient (0.0-1.0). Higher = slower transitions.
+    #[inline]
+    pub fn set_coeff(&mut self, coeff: f32) {
+        self.coeff = coeff.clamp(0.0, 1.0);
+    }
+
     /// Get the current target value.
     ///
     /// Useful for reading the target without advancing the slew state (e.g., for normalization caching).

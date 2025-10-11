@@ -23,7 +23,8 @@
 - Build: `./scripts/build.sh`
 - Crates: Use latest versions
 - Code style: Elegant, efficient, public fields over getters
-- Collaboration: Write code incrementally (function/struct-length), not full files - user wants ownership
+- Collaboration: Write code incrementally (function/struct-length), not full files - user wants ownership. Discuss changes in chat first—only send code snippets after receiving spoken confirmation from user. Push back on claims from both angles to find truth—never accept user's or your own assertions without scrutiny.
 - Questions: Number them, attach recommendations (based on audio/hardware best practices)
 - Comments: Only when strictly needed, concise. Never include specific numeric values in comments if those values come from config.rs - they may change and create stale documentation
 - Where possible and necessary, run python code to verify the algorithm/calculation is correct
+- **Synthesis**: Generative melodies need long decays (300-800ms), strong resonance (3.5-4.0), harmonic anchoring, ~50ms portamento. Verify synthesis matches algorithmic intent.

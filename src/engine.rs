@@ -110,10 +110,6 @@ impl Engine {
                     self.clock.set_bpm(bpm);
                 }
 
-                Message::SetBassEuclideanLength(length) => {
-                    self.bass_voice.euclidean.set_length(length);
-                }
-
                 Message::SetBassEuclideanHits(hits) => {
                     self.bass_voice.euclidean.set_hits(hits);
                 }
@@ -129,6 +125,13 @@ impl Engine {
                 Message::SetMutationRate(rate) => {
                     self.bass_voice.turing.set_mutation_rate(rate);
                     self.lead_voice.turing.set_mutation_rate(rate);
+                }
+
+                Message::SetPortamento(coeff) => {
+                    self.bass_voice.osc1.set_portamento_coeff(coeff);
+                    self.bass_voice.osc2.set_portamento_coeff(coeff);
+                    self.lead_voice.osc1.set_portamento_coeff(coeff);
+                    self.lead_voice.osc2.set_portamento_coeff(coeff);
                 }
 
                 _ => {} // Ignore old oscillator messages
@@ -151,10 +154,11 @@ impl Engine {
         self.lead_voice.osc1.update_parameters();
         self.lead_voice.osc2.update_parameters();
 
-        // Filter LFO modulation
-        let lfo_value = self.filter_lfo.tick();
-        let modulated_cutoff = self.base_cutoff + (lfo_value * self.lfo_cutoff_range);
-        self.filter.set_cutoff(modulated_cutoff);
+        // Filter LFO modulation (DISABLED - saves ~10-15 cycles/buffer)
+        // let lfo_value = self.filter_lfo.tick();
+        // let modulated_cutoff = self.base_cutoff + (lfo_value * self.lfo_cutoff_range);
+        // self.filter.set_cutoff(modulated_cutoff);
+        self.filter.set_cutoff(self.base_cutoff);
         self.filter.update_coefficients();
     }
 
@@ -165,8 +169,8 @@ impl Engine {
         let bass = self.bass_voice.render();
         let lead = self.lead_voice.render();
 
-        // Mix voices (bass-heavy for techno character)
-        let mix = bass + lead;
+        // Mix voices with proper headroom (×0.5 prevents clipping when both voices active)
+        let mix = (bass + lead) * 0.5;
 
         // Process through Moog Ladder Filter (can exceed ±1.0 at high resonance)
         let filtered = self.filter.process(mix);

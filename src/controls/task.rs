@@ -2,9 +2,8 @@
 
 use crate::config::*;
 use crate::controls::{
-    map_bass_euclidean_hits, map_bass_euclidean_length, map_cutoff, map_lead_euclidean_hits,
-    map_lead_euclidean_length, map_mutation_rate, map_resonance, map_tempo, CtrlSender,
-    Potentiometer,
+    map_bass_euclidean_hits, map_cutoff, map_lead_euclidean_hits, map_lead_euclidean_length,
+    map_mutation_rate, map_portamento, map_resonance, map_tempo, CtrlSender, Potentiometer,
 };
 use crate::hardware::{AdcBus, AnyAdcPin};
 use embassy_time::{Duration, Timer};
@@ -19,9 +18,9 @@ use embassy_time::{Duration, Timer};
 /// - Pot 2 (GPIO2): Filter Resonance
 /// - Pot 3 (GPIO3): Tempo
 /// - Pot 4 (GPIO4): Mutation Rate
-/// - Pot 5 (GPIO5): Bass Pattern Length
+/// - Pot 5 (GPIO5): Portamento Time (pitch glide speed)
 /// - Pot 6 (GPIO6): Lead Pattern Length
-/// - Pot 7 (GPIO7): Bass Hit Density (pot min = mute)
+/// - Pot 7 (GPIO7): Bass Hit Density (pot min = mute, length fixed)
 /// - Pot 8 (GPIO8): Lead Hit Density (pot min = mute)
 ///
 /// # Arguments
@@ -36,7 +35,7 @@ pub async fn pot_task(sender: CtrlSender, mut adc_bus: AdcBus, mut pins: [AnyAdc
         Potentiometer::new(map_resonance),             // Pot 2 (GPIO2)
         Potentiometer::new(map_tempo),                 // Pot 3 (GPIO3)
         Potentiometer::new(map_mutation_rate),         // Pot 4 (GPIO4)
-        Potentiometer::new(map_bass_euclidean_length), // Pot 5 (GPIO5)
+        Potentiometer::new(map_portamento),            // Pot 5 (GPIO5)
         Potentiometer::new(map_lead_euclidean_length), // Pot 6 (GPIO6)
         Potentiometer::new(map_bass_euclidean_hits),   // Pot 7 (GPIO7)
         Potentiometer::new(map_lead_euclidean_hits),   // Pot 8 (GPIO8)

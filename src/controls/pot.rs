@@ -239,14 +239,14 @@ pub fn map_cutoff(normalized: f32) -> Message {
 
 /// Map normalized value (0.0-1.0) to filter resonance.
 ///
-/// Uses Linear + Linear for simple, predictable response.
-/// Resonance (Q factor) is already perceptually uniform.
+/// Uses Power + Linear for controlled response at low end.
+/// Prevents harsh screeching from aliasing at low pot positions.
 pub fn map_resonance(normalized: f32) -> Message {
     use crate::config::{FILTER_RESONANCE_MAX, FILTER_RESONANCE_MIN};
 
     let resonance = map_range(
         normalized,
-        Curve::Linear,
+        Curve::Power,
         Range::Linear {
             min: FILTER_RESONANCE_MIN,
             max: FILTER_RESONANCE_MAX,
@@ -303,16 +303,19 @@ pub fn map_tempo(normalized: f32) -> Message {
     Message::SetTempo(bpm)
 }
 
-/// Map normalized value (0.0-1.0) to bass Euclidean pattern length (4-16 steps).
-pub fn map_bass_euclidean_length(normalized: f32) -> Message {
-    let length = map_range(normalized, Curve::Linear, Range::Linear { min: 4.0, max: 16.0 });
-    Message::SetBassEuclideanLength(length.round() as usize)
-}
-
-/// Map normalized value (0.0-1.0) to bass Euclidean hits (0-16).
+/// Map normalized value (0.0-1.0) to bass Euclidean hits.
 /// Value of 0 mutes the voice (rhythm advances silently to keep polyrhythms locked).
 pub fn map_bass_euclidean_hits(normalized: f32) -> Message {
-    let hits = map_range(normalized, Curve::Linear, Range::Linear { min: 0.0, max: 16.0 });
+    use crate::config::BASS_EUCLIDEAN_LENGTH;
+
+    let hits = map_range(
+        normalized,
+        Curve::Linear,
+        Range::Linear {
+            min: 0.0,
+            max: BASS_EUCLIDEAN_LENGTH as f32,
+        },
+    );
     Message::SetBassEuclideanHits(hits.round() as usize)
 }
 
@@ -342,4 +345,21 @@ pub fn map_mutation_rate(normalized: f32) -> Message {
         },
     );
     Message::SetMutationRate(rate)
+}
+
+/// Map normalized value (0.0-1.0) to portamento smoothing coefficient.
+///
+/// Uses Linear + Linear for direct, predictable portamento response.
+pub fn map_portamento(normalized: f32) -> Message {
+    use crate::config::{PORTAMENTO_COEFF_MIN, PORTAMENTO_COEFF_MAX};
+
+    let coeff = map_range(
+        normalized,
+        Curve::Linear,
+        Range::Linear {
+            min: PORTAMENTO_COEFF_MIN,
+            max: PORTAMENTO_COEFF_MAX,
+        },
+    );
+    Message::SetPortamento(coeff)
 }

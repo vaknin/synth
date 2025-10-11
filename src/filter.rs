@@ -82,7 +82,7 @@ impl MoogLadderFilter {
     ///
     /// # Arguments
     /// * `freq` - Cutoff frequency in Hz (20-20000 Hz, full audible range)
-    #[inline(always)]
+    #[inline]
     pub fn set_cutoff(&mut self, freq: f32) {
         let new_cutoff = freq.clamp(
             crate::config::FILTER_CUTOFF_MIN,

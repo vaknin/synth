@@ -4,8 +4,9 @@
 //! then renders audio through oscillator and envelope.
 
 use crate::config::{
-    BASS_OCTAVE_RANGE, BASS_ROOT_HZ, EUCLIDEAN_INITIAL_HITS, EUCLIDEAN_INITIAL_LENGTH,
-    LEAD_OCTAVE_RANGE, LEAD_ROOT_HZ,
+    BASS_EUCLIDEAN_LENGTH, BASS_OCTAVE_RANGE, BASS_ROOT_HZ, ENVELOPE_DECAY_MAX_MS,
+    ENVELOPE_DECAY_MIN_MS, EUCLIDEAN_INITIAL_HITS, EUCLIDEAN_INITIAL_LENGTH, LEAD_OCTAVE_RANGE,
+    LEAD_ROOT_HZ,
 };
 use crate::envelope::ADEnvelope;
 use crate::euclidean::EuclideanRhythm;
@@ -71,11 +72,11 @@ impl Voice {
     ///
     /// Root: 55 Hz (A1) - sub-bass territory for club systems
     /// Range: 1.5 octaves - tight melodic movement
-    /// Initial rhythm overwritten by pots within ~20ms
+    /// Pattern length: fixed, hits controlled by pot
     pub fn bass() -> Self {
         Self::new(
             EUCLIDEAN_INITIAL_HITS,
-            EUCLIDEAN_INITIAL_LENGTH,
+            BASS_EUCLIDEAN_LENGTH,
             BASS_ROOT_HZ,
             BASS_OCTAVE_RANGE,
             Waveform::Saw,
@@ -122,6 +123,11 @@ impl Voice {
             // Update both oscillators (osc2 auto-applies +5¢ detune)
             self.osc1.set_frequency(pitch_hz);
             self.osc2.set_frequency(pitch_hz);
+
+            // Randomize envelope decay based on Turing output
+            let variation = (turing_value + 1.0) * 0.5; // Map -1.0→1.0 to 0.0→1.0
+            let decay_ms = ENVELOPE_DECAY_MIN_MS + variation * (ENVELOPE_DECAY_MAX_MS - ENVELOPE_DECAY_MIN_MS);
+            self.envelope.set_decay_ms(decay_ms);
 
             // Trigger envelope attack
             self.envelope.trigger();
