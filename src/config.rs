@@ -65,6 +65,12 @@ pub const POLYBLEP_THRESHOLD_PHASE_INC: f32 = POLYBLEP_THRESHOLD_HZ / SAMPLE_RAT
 /// Provides headroom even when all voices are at max volume (0.95 ≈ -0.45 dB).
 pub const MASTER_GAIN: f32 = 0.90;
 
+/// Saturation drive amount (pre-gain before soft-clipping).
+/// Values > 1.0 push signals into compression zone for analog-style warmth.
+/// 1.0 = clean (no extra drive), 2.0-3.0 = fat bass, 4.0+ = aggressive distortion.
+/// Applied before soft_clip() to add harmonic richness and thickness.
+pub const SATURATION_DRIVE: f32 = 2.5;
+
 // === Wavetable ===
 
 /// Wavetable size (must remain a power of two for fast wrapping).
@@ -175,6 +181,13 @@ pub const FILTER_RESONANCE_MIN: f32 = 0.1;
 /// Higher values overdrive the feedback path, losing the characteristic Moog tone.
 pub const FILTER_RESONANCE_MAX: f32 = 1.0;
 
+/// Denormal prevention threshold for filter state variables.
+/// Zeros out filter state when it decays below this value to prevent FPU slowdown.
+/// 1e-15 is ~-300dB (completely inaudible, below -140dB noise floor) but well above
+/// denormal range (< 1.18e-38). Critical for ESP32-S3 performance - denormals cause
+/// 100× slowdown. Filter state reaches denormals in 2-26ms of silence.
+pub const FILTER_DENORMAL_THRESHOLD: f32 = 1e-15;
+
 // === LFO (Low-Frequency Oscillator) ===
 
 /// Minimum LFO frequency (Hz).
@@ -202,6 +215,32 @@ pub const GENERATIVE_OCTAVE_RANGE_MIN: f32 = 1.0;
 /// Determines lookup table size: ±(MAX × 12 semitones) = ±48 semitones.
 pub const GENERATIVE_OCTAVE_RANGE_MAX: f32 = 4.0;
 
+// === Voice Architecture ===
+
+/// Bass voice root frequency (A1 - classic techno sub-bass territory).
+/// 55 Hz provides deep bass that translates well on club systems.
+pub const BASS_ROOT_HZ: f32 = 55.0;
+
+/// Bass voice octave range (controlled melodic movement).
+/// 1.5 octaves keeps bass low and tight while allowing melodic variation.
+pub const BASS_OCTAVE_RANGE: f32 = 1.5;
+
+/// Lead voice root frequency (E4 - bright melodic register).
+/// 330 Hz cuts through mix and provides energetic melodic content.
+pub const LEAD_ROOT_HZ: f32 = 330.0;
+
+/// Lead voice octave range (dramatic melodic jumps).
+/// 3.0 octaves enables wide, expressive lead melodies.
+pub const LEAD_OCTAVE_RANGE: f32 = 3.0;
+
+/// Initial euclidean hits (immediately overwritten by pot ADC values).
+/// Set to 1 for safe, silent startup until pots are read (~20ms).
+pub const EUCLIDEAN_INITIAL_HITS: usize = 1;
+
+/// Initial euclidean length (immediately overwritten by pot ADC values).
+/// Set to 8 for safe rhythm initialization until pots are read (~20ms).
+pub const EUCLIDEAN_INITIAL_LENGTH: usize = 8;
+
 // === Turing Machine ===
 
 /// Minimum loop length in bits for Turing Machine shift register.
@@ -228,7 +267,7 @@ pub const TURING_MUTATION_DEFAULT: f32 = 0.05;
 
 /// Minimum tempo in beats per minute.
 /// 80 BPM = deep techno, ambient territory.
-pub const CLOCK_BPM_MIN: f32 = 60.0;
+pub const CLOCK_BPM_MIN: f32 = 20.0;
 
 /// Maximum tempo in beats per minute.
 /// 180 BPM = fast techno, high-energy performance.

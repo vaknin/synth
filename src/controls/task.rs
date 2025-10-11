@@ -15,14 +15,14 @@ use embassy_time::{Duration, Timer};
 /// signal processing state (EMA filter, deadband) but shares the hardware.
 ///
 /// Current 8-pot setup (generative phase):
-/// - Pot 0 (GPIO1): Filter Cutoff
-/// - Pot 1 (GPIO2): Filter Resonance
-/// - Pot 2 (GPIO3): Bass Pattern Length (4-16 steps)
-/// - Pot 3 (GPIO4): Bass Hit Density (1-16 hits)
-/// - Pot 4 (GPIO5): Lead Pattern Length (3-17 steps)
-/// - Pot 5 (GPIO6): Lead Hit Density (1-17 hits)
-/// - Pot 6 (GPIO7): Tempo (80-180 BPM)
-/// - Pot 7 (GPIO8): Mutation Rate (0-50%)
+/// - Pot 1 (GPIO1): Filter Cutoff
+/// - Pot 2 (GPIO2): Filter Resonance
+/// - Pot 3 (GPIO3): Tempo
+/// - Pot 4 (GPIO4): Mutation Rate
+/// - Pot 5 (GPIO5): Bass Pattern Length
+/// - Pot 6 (GPIO6): Lead Pattern Length
+/// - Pot 7 (GPIO7): Bass Hit Density (pot min = mute)
+/// - Pot 8 (GPIO8): Lead Hit Density (pot min = mute)
 ///
 /// # Arguments
 /// * `sender` - Embassy channel sender for control messages
@@ -32,14 +32,14 @@ use embassy_time::{Duration, Timer};
 pub async fn pot_task(sender: CtrlSender, mut adc_bus: AdcBus, mut pins: [AnyAdcPin; 8]) {
     // Create pot state objects with mapping functions
     let mut pots = [
-        Potentiometer::new(map_cutoff),
-        Potentiometer::new(map_resonance),
-        Potentiometer::new(map_bass_euclidean_length),
-        Potentiometer::new(map_bass_euclidean_hits),
-        Potentiometer::new(map_lead_euclidean_length),
-        Potentiometer::new(map_lead_euclidean_hits),
-        Potentiometer::new(map_tempo),
-        Potentiometer::new(map_mutation_rate),
+        Potentiometer::new(map_cutoff),                // Pot 1 (GPIO1)
+        Potentiometer::new(map_resonance),             // Pot 2 (GPIO2)
+        Potentiometer::new(map_tempo),                 // Pot 3 (GPIO3)
+        Potentiometer::new(map_mutation_rate),         // Pot 4 (GPIO4)
+        Potentiometer::new(map_bass_euclidean_length), // Pot 5 (GPIO5)
+        Potentiometer::new(map_lead_euclidean_length), // Pot 6 (GPIO6)
+        Potentiometer::new(map_bass_euclidean_hits),   // Pot 7 (GPIO7)
+        Potentiometer::new(map_lead_euclidean_hits),   // Pot 8 (GPIO8)
     ];
 
     loop {

@@ -39,21 +39,21 @@ pub enum Message {
     SetFilterLfoDepth(f32),
 
     // === GENERATIVE PARAMETERS ===
-    /// Set global tempo in BPM (80-180)
+    /// Set global tempo in BPM
     SetTempo(f32),
 
-    /// Set bass Euclidean pattern length in steps (4-16)
+    /// Set bass Euclidean pattern length in steps
     SetBassEuclideanLength(usize),
 
-    /// Set bass Euclidean hits (1-length)
+    /// Set bass Euclidean hits (0 = mute)
     SetBassEuclideanHits(usize),
 
-    /// Set lead Euclidean pattern length in steps (3-17)
+    /// Set lead Euclidean pattern length in steps
     SetLeadEuclideanLength(usize),
 
-    /// Set lead Euclidean hits (1-length)
+    /// Set lead Euclidean hits (0 = mute)
     SetLeadEuclideanHits(usize),
 
-    /// Set Turing Machine mutation rate (0.0-0.5, shared for both voices)
+    /// Set Turing Machine mutation rate (shared for both voices)
     SetMutationRate(f32),
 }

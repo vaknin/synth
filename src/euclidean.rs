@@ -46,6 +46,12 @@ impl EuclideanRhythm {
     /// true if this step is a hit (trigger gate/envelope), false for rest
     #[inline]
     pub fn tick(&mut self) -> bool {
+        // Fast path: muted voice (hits=0) still advances to keep polyrhythms locked
+        if self.hits == 0 {
+            self.position = (self.position + 1) % self.length;
+            return false;
+        }
+
         let gate = self.pattern[self.position];
         self.position = (self.position + 1) % self.length;
         gate

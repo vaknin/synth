@@ -25,5 +25,5 @@
 - Code style: Elegant, efficient, public fields over getters
 - Collaboration: Write code incrementally (function/struct-length), not full files - user wants ownership
 - Questions: Number them, attach recommendations (based on audio/hardware best practices)
-- Comments: Only when strictly needed, concise
+- Comments: Only when strictly needed, concise. Never include specific numeric values in comments if those values come from config.rs - they may change and create stale documentation
 - Where possible and necessary, run python code to verify the algorithm/calculation is correct

@@ -59,14 +59,14 @@ Oscillators → Envelope → Moog Filter → Delay → Output
 - [~] Test basic polyrhythms (E(3,8) + E(5,13)) - **IN PROGRESS (hardware testing)**
 
 **Pot Allocation (8 pots wired)**:
-- Pot 0: Filter Cutoff
-- Pot 1: Filter Resonance
-- Pot 2: Bass Pattern Length (4-16 steps)
-- Pot 3: Bass Hit Density (1-16 hits)
-- Pot 4: Lead Pattern Length (3-17 steps)
-- Pot 5: Lead Hit Density (1-17 hits)
-- Pot 6: Tempo (80-180 BPM)
-- Pot 7: Mutation Rate (0-50%, affects both voices)
+- Pot 1: Filter Cutoff
+- Pot 2: Filter Resonance
+- Pot 3: Tempo (80-180 BPM)
+- Pot 4: Mutation Rate (0-50%, affects both voices)
+- Pot 5: Bass Pattern Length (4-16 steps)
+- Pot 6: Lead Pattern Length (3-17 steps)
+- Pot 7: Bass Hit Density (1-16 hits)
+- Pot 8: Lead Hit Density (1-17 hits)
 
 ---
 
@@ -79,7 +79,7 @@ Oscillators → Envelope → Moog Filter → Delay → Output
 - [x] Create smooth glide between notes - Oscillator pitch smoothing
 - [x] Integrate into Voice abstraction - `src/voice.rs` (Euclidean + Turing + Quantizer + Dual Osc + Envelope)
 - [ ] Add randomized swing (10-25% variation for human groove)
-- [x] Wire 8 pots (Pot 0-7) - See Phase 1 pot allocation
+- [x] Wire 8 pots (Pot 1-8) - See Phase 1 pot allocation
 
 **Status**: Phase 2 essentially complete (swing timing feature deferred)
 
@@ -108,18 +108,18 @@ Oscillators → Envelope → Moog Filter → Delay → Output
 
 ```
 PERFORMANCE (2 pots):
-0. Filter Cutoff (main performance control, 20 Hz - 20 kHz)
-1. Filter Resonance (0.0 - 0.95, Moog scream at high values)
-
-RHYTHM GENERATION (4 pots):
-2. Bass Pattern Length (4-16 steps, Euclidean parameter n)
-3. Bass Hit Density (1-16 hits, Euclidean parameter k)
-4. Lead Pattern Length (3-17 steps, offset for polyrhythm)
-5. Lead Hit Density (1-17 hits, creates pattern complexity)
+1. Filter Cutoff (main performance control, 20 Hz - 20 kHz)
+2. Filter Resonance (0.0 - 0.95, Moog scream at high values)
 
 GLOBAL CONTROLS (2 pots):
-6. Tempo (80-180 BPM, affects all voices)
-7. Mutation Rate (0-50%, applies to both Turing Machines)
+3. Tempo (80-180 BPM, affects all voices)
+4. Mutation Rate (0-50%, applies to both Turing Machines)
+
+RHYTHM GENERATION (4 pots):
+5. Bass Pattern Length (4-16 steps, Euclidean parameter n)
+6. Lead Pattern Length (3-17 steps, offset for polyrhythm)
+7. Bass Hit Density (1-16 hits, Euclidean parameter k)
+8. Lead Hit Density (1-17 hits, creates pattern complexity)
 ```
 
 ### Future Expansion (4+ Pots Available)

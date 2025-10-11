@@ -1,21 +1,18 @@
 //! Engine module: manages generative voices, processes messages, renders audio.
 
 use crate::clock::Clock;
-use crate::config::MASTER_GAIN;
+use crate::config::{MASTER_GAIN, SATURATION_DRIVE};
 use crate::filter::MoogLadderFilter;
 use crate::lfo::LFO;
 use crate::message::Message;
 use crate::slew::Slew;
 use crate::voice::Voice;
 use crate::{AudioStream, ChannelReceiver, I16_MAX_F32};
-use micromath::F32Ext;
 
 /// Fast soft-clipping saturation using rational function approximation.
 ///
 /// Maps [-∞, ∞] → [-1, 1] smoothly, preserving signal character while preventing
 /// digital clipping. Adds subtle analog warmth via smooth compression.
-///
-/// Uses micromath::F32Ext::abs() for consistent embedded performance.
 ///
 /// Cost: ~5-8 cycles (vs 2-3 for hard clamp, but musically superior)
 ///
@@ -27,7 +24,7 @@ use micromath::F32Ext;
 /// ```
 #[inline]
 fn soft_clip(x: f32) -> f32 {
-    x / (1.0 + F32Ext::abs(x))
+    x / (1.0 + x.abs())
 }
 
 /// Main synth engine with generative voices (Turing Machine + Euclidean rhythms).
@@ -169,15 +166,15 @@ impl Engine {
         let lead = self.lead_voice.render();
 
         // Mix voices (bass-heavy for techno character)
-        let mix = bass * 0.6 + lead * 0.8; //debug 0 instead of 0.4
+        let mix = bass + lead;
 
         // Process through Moog Ladder Filter (can exceed ±1.0 at high resonance)
         let filtered = self.filter.process(mix);
 
-        // Soft saturation: prevents i16 wraparound + adds analog warmth
-        // Fast approximation: ~5 cycles vs 2 for hard clamp, but preserves filter character
-        // TODO: Add drive control (pre-gain) when Pot 11 is wired (Phase 1 roadmap)
-        soft_clip(filtered)
+        // Saturation with drive: pre-gain pushes signal into compression zone for analog warmth
+        // Fast approximation: ~5 cycles vs 2 for hard clamp, but musically superior
+        // Drive configurable in config.rs (currently hardcoded, future pot control available)
+        soft_clip(filtered * SATURATION_DRIVE)
     }
 
     /// Render audio samples into the DMA buffer.

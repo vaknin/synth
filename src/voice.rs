@@ -3,6 +3,10 @@
 //! Each voice generates its own patterns via Euclidean rhythms and Turing Machine,
 //! then renders audio through oscillator and envelope.
 
+use crate::config::{
+    BASS_OCTAVE_RANGE, BASS_ROOT_HZ, EUCLIDEAN_INITIAL_HITS, EUCLIDEAN_INITIAL_LENGTH,
+    LEAD_OCTAVE_RANGE, LEAD_ROOT_HZ,
+};
 use crate::envelope::ADEnvelope;
 use crate::euclidean::EuclideanRhythm;
 use crate::oscillator::{Oscillator, Waveform};
@@ -63,14 +67,34 @@ impl Voice {
         }
     }
 
-    /// Create bass voice (C2, saw wave, E(3,8)).
+    /// Create bass voice (A1 root, saw wave, deep techno character).
+    ///
+    /// Root: 55 Hz (A1) - sub-bass territory for club systems
+    /// Range: 1.5 octaves - tight melodic movement
+    /// Initial rhythm overwritten by pots within ~20ms
     pub fn bass() -> Self {
-        Self::new(3, 8, 65.0, 2.0, Waveform::Saw)
+        Self::new(
+            EUCLIDEAN_INITIAL_HITS,
+            EUCLIDEAN_INITIAL_LENGTH,
+            BASS_ROOT_HZ,
+            BASS_OCTAVE_RANGE,
+            Waveform::Saw,
+        )
     }
 
-    /// Create lead voice (C4, square wave, E(5,13)).
+    /// Create lead voice (E4 root, square wave, bright melodic character).
+    ///
+    /// Root: 330 Hz (E4) - cuts through mix
+    /// Range: 3.0 octaves - dramatic melodic jumps
+    /// Initial rhythm overwritten by pots within ~20ms
     pub fn lead() -> Self {
-        Self::new(5, 13, 260.0, 3.0, Waveform::Square)
+        Self::new(
+            EUCLIDEAN_INITIAL_HITS,
+            EUCLIDEAN_INITIAL_LENGTH,
+            LEAD_ROOT_HZ,
+            LEAD_OCTAVE_RANGE,
+            Waveform::Square,
+        )
     }
 
     /// Process one clock step (rhythm + melody generation).

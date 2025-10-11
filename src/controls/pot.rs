@@ -309,9 +309,10 @@ pub fn map_bass_euclidean_length(normalized: f32) -> Message {
     Message::SetBassEuclideanLength(length.round() as usize)
 }
 
-/// Map normalized value (0.0-1.0) to bass Euclidean hits (1-16).
+/// Map normalized value (0.0-1.0) to bass Euclidean hits (0-16).
+/// Value of 0 mutes the voice (rhythm advances silently to keep polyrhythms locked).
 pub fn map_bass_euclidean_hits(normalized: f32) -> Message {
-    let hits = map_range(normalized, Curve::Linear, Range::Linear { min: 1.0, max: 16.0 });
+    let hits = map_range(normalized, Curve::Linear, Range::Linear { min: 0.0, max: 16.0 });
     Message::SetBassEuclideanHits(hits.round() as usize)
 }
 
@@ -321,9 +322,10 @@ pub fn map_lead_euclidean_length(normalized: f32) -> Message {
     Message::SetLeadEuclideanLength(length.round() as usize)
 }
 
-/// Map normalized value (0.0-1.0) to lead Euclidean hits (1-17).
+/// Map normalized value (0.0-1.0) to lead Euclidean hits (0-17).
+/// Value of 0 mutes the voice (rhythm advances silently to keep polyrhythms locked).
 pub fn map_lead_euclidean_hits(normalized: f32) -> Message {
-    let hits = map_range(normalized, Curve::Linear, Range::Linear { min: 1.0, max: 17.0 });
+    let hits = map_range(normalized, Curve::Linear, Range::Linear { min: 0.0, max: 17.0 });
     Message::SetLeadEuclideanHits(hits.round() as usize)
 }
 
