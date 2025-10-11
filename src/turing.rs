@@ -11,11 +11,11 @@ use crate::noise::WhiteNoise;
 
 /// Turing Machine melody generator.
 ///
-/// 16-bit shift register with probabilistic mutations.
+/// 32-bit shift register with probabilistic mutations.
 /// Outputs normalized value for scale quantization.
 pub struct TuringMachine {
-    /// 16-bit shift register state (private)
-    register: u16,
+    /// 32-bit shift register state (private)
+    register: u32,
     /// Active loop length in bits (2-32)
     pub loop_length: usize,
     /// Mutation probability per step (0.0-0.5)
@@ -29,8 +29,8 @@ impl TuringMachine {
     pub fn new() -> Self {
         let mut noise = WhiteNoise::new();
 
-        // Generate random initial register state (full 16 bits)
-        let register = (noise.next_f32() * 65535.0) as u16;
+        // Generate random initial register state (full 32 bits)
+        let register = (noise.next_f32() * u32::MAX as f32) as u32;
 
         Self {
             register,

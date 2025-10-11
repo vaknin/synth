@@ -24,6 +24,7 @@ pub mod oscillator;
 pub mod quantizer;
 pub mod slew;
 pub mod turing;
+pub mod voice;
 
 // Re-export paste for use in generated macros
 #[doc(hidden)]

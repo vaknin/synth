@@ -183,13 +183,23 @@ impl MoogLadderFilter {
         // Unrolled for performance (4 iterations, no loop overhead)
         // Each stage: y[n] = g_inv*y[n-1] + g_norm*x[n]
         // This formulation is ALWAYS STABLE because g_norm < 1.0 for all g
+
+        // OPTIMIZATION: Compute in registers to eliminate read-after-write hazards
+        // Original code forced memory round-trip between each stage (pipeline stalls)
+        // Register-based flow enables CPU pipelining and reduces memory traffic
         let input_compensated = input - feedback;
-        self.stage[0] = g_inv * self.stage[0] + g_norm * input_compensated;
-        self.stage[1] = g_inv * self.stage[1] + g_norm * self.stage[0];
-        self.stage[2] = g_inv * self.stage[2] + g_norm * self.stage[1];
-        self.stage[3] = g_inv * self.stage[3] + g_norm * self.stage[2];
+        let s0 = g_inv * self.stage[0] + g_norm * input_compensated;
+        let s1 = g_inv * self.stage[1] + g_norm * s0;
+        let s2 = g_inv * self.stage[2] + g_norm * s1;
+        let s3 = g_inv * self.stage[3] + g_norm * s2;
+
+        // Write back to state array (CPU can pipeline these stores)
+        self.stage[0] = s0;
+        self.stage[1] = s1;
+        self.stage[2] = s2;
+        self.stage[3] = s3;
 
         // Output from final stage
-        self.stage[3]
+        s3
     }
 }

@@ -10,7 +10,7 @@ pub const APP_CORE_STACK_SIZE: usize = 4096; //4096 is a pretty good/safe value
 // === Synth Engine ===
 
 /// Number of simultaneously mixable voices.
-pub const VOICE_COUNT: usize = 3;
+pub const VOICE_COUNT: usize = 2;
 
 /// Audio sample rate in Hz.
 ///
@@ -173,7 +173,7 @@ pub const FILTER_RESONANCE_MIN: f32 = 0.1;
 /// 4.0 enables classic Moog self-oscillation - the "sweet spot" before harsh distortion.
 /// At k≈4.0, loop gain reaches unity and filter whistles musically.
 /// Higher values overdrive the feedback path, losing the characteristic Moog tone.
-pub const FILTER_RESONANCE_MAX: f32 = 2.0;
+pub const FILTER_RESONANCE_MAX: f32 = 1.0;
 
 // === LFO (Low-Frequency Oscillator) ===
 
@@ -228,11 +228,11 @@ pub const TURING_MUTATION_DEFAULT: f32 = 0.05;
 
 /// Minimum tempo in beats per minute.
 /// 80 BPM = deep techno, ambient territory.
-pub const CLOCK_BPM_MIN: f32 = 80.0;
+pub const CLOCK_BPM_MIN: f32 = 60.0;
 
 /// Maximum tempo in beats per minute.
 /// 180 BPM = fast techno, high-energy performance.
-pub const CLOCK_BPM_MAX: f32 = 180.0;
+pub const CLOCK_BPM_MAX: f32 = 220.0;
 
 /// Default tempo on initialization (BPM).
 /// 120 BPM = standard dance music tempo.
@@ -257,6 +257,3 @@ pub const ENVELOPE_ATTACK_MS: f32 = 5.0;
 /// Default envelope decay time in milliseconds.
 /// Used for bass and lead voices - tight, punchy decay.
 pub const ENVELOPE_DEFAULT_DECAY_MS: f32 = 80.0;
-
-/// Minimum envelope decay time in milliseconds.
-pub const ENVELOPE_MIN_DECAY_MS: f32 = 10.0;

@@ -3,10 +3,12 @@
 **Vision**: Pocket-sized Aphex Twin machine. Evolving melodies (Turing Machine) + polyrhythmic patterns (Euclidean rhythms). You perform filter sweeps while algorithms create the music.
 
 **Current State**:
-- Phases 1-3 complete (see ARCHITECTURE.md)
-- 4 oscillators, Moog filter working
-- 6 pots wired, 6 more available (12 total)
-- 10+ pots arriving from AliExpress
+- Phase 1: ✅ COMPLETE (hardware testing in progress)
+- Phase 2: ✅ MOSTLY COMPLETE (swing timing deferred)
+- Phase 3: ⏸️ NOT STARTED (delay effects)
+- 4 oscillators (2 per voice), Moog filter, LFOs working
+- 8 pots wired and functional
+- Generative system operational: Euclidean rhythms + Turing Machine + Quantizer
 
 **Target Sound**: Fat techno bass + glitchy melodic lead with polyrhythmic complexity
 
@@ -51,17 +53,20 @@ Oscillators → Envelope → Moog Filter → Delay → Output
 **Tasks**:
 - [x] Create `src/euclidean.rs` - Bjorklund algorithm (COMPLETE, verified with Python)
 - [x] Create `src/turing.rs` - Shift register with mutation (COMPLETE, verified with Python)
-- [ ] Create `src/quantizer.rs` - Scale quantization (reuse from current plan)
-- [ ] Add tempo control (80-180 BPM for live energy control)
-- [ ] Add saturation/distortion (soft clipping for PHAT bass)
-- [ ] Test basic polyrhythms (E(3,8) + E(5,13))
+- [x] Create `src/quantizer.rs` - Scale quantization with 12 scales + optimized lookup tables
+- [x] Add tempo control (80-180 BPM) - `src/clock.rs` with smooth slew transitions
+- [x] Add saturation/distortion - `soft_clip()` function in `src/engine.rs`
+- [~] Test basic polyrhythms (E(3,8) + E(5,13)) - **IN PROGRESS (hardware testing)**
 
-**Pot Allocation (First 6)**:
-- Pot 0-1: Filter Cutoff/Resonance (keep existing)
-- Pot 2: Bass Pattern Length
-- Pot 3: Bass Hit Density
-- Pot 4: Lead Pattern Length
-- Pot 5: Lead Hit Density
+**Pot Allocation (8 pots wired)**:
+- Pot 0: Filter Cutoff
+- Pot 1: Filter Resonance
+- Pot 2: Bass Pattern Length (4-16 steps)
+- Pot 3: Bass Hit Density (1-16 hits)
+- Pot 4: Lead Pattern Length (3-17 steps)
+- Pot 5: Lead Hit Density (1-17 hits)
+- Pot 6: Tempo (80-180 BPM)
+- Pot 7: Mutation Rate (0-50%, affects both voices)
 
 ---
 
@@ -69,17 +74,16 @@ Oscillators → Envelope → Moog Filter → Delay → Output
 **Goal**: Add evolving melodies via Turing Machine
 
 **Tasks**:
-- [ ] Implement mutation logic (bit flipping with probability)
-- [ ] Add scale quantization to Turing output
-- [ ] Create smooth glide between notes
+- [x] Implement mutation logic (bit flipping with probability) - `src/turing.rs`
+- [x] Add scale quantization to Turing output - `src/quantizer.rs` (12 scales)
+- [x] Create smooth glide between notes - Oscillator pitch smoothing
+- [x] Integrate into Voice abstraction - `src/voice.rs` (Euclidean + Turing + Quantizer + Dual Osc + Envelope)
 - [ ] Add randomized swing (10-25% variation for human groove)
-- [ ] Wire remaining 6 pots
+- [x] Wire 8 pots (Pot 0-7) - See Phase 1 pot allocation
 
-**Additional Pots (6-11)**:
-- Pot 6-7: Bass/Lead Mutation Rate
-- Pot 8-9: Bass/Lead Loop Length
-- Pot 10: Tempo (80-180 BPM)
-- Pot 11: Saturation Drive
+**Status**: Phase 2 essentially complete (swing timing feature deferred)
+
+**Note**: Voice architecture now encapsulates all generative components per-voice, cleaner than original roadmap design.
 
 ---
 
@@ -98,34 +102,58 @@ Oscillators → Envelope → Moog Filter → Delay → Output
 
 ---
 
-## Control Mapping (12 Pots)
+## Control Mapping
+
+### Current Configuration (8 Pots - Wired)
 
 ```
-RHYTHM (4 pots):
-0. Bass Pattern Length (4-16 steps)
-1. Bass Hit Density (2-15 hits)
-2. Lead Pattern Length (3-17 steps - offset for polyrhythm)
-3. Lead Hit Density (2-16 hits)
+PERFORMANCE (2 pots):
+0. Filter Cutoff (main performance control, 20 Hz - 20 kHz)
+1. Filter Resonance (0.0 - 0.95, Moog scream at high values)
 
-MELODY (4 pots):
-4. Bass Mutation Rate (0-20%)
-5. Bass Loop Length (8-32 bits)
-6. Lead Mutation Rate (0-50%)
-7. Lead Loop Length (8-32 bits)
+RHYTHM GENERATION (4 pots):
+2. Bass Pattern Length (4-16 steps, Euclidean parameter n)
+3. Bass Hit Density (1-16 hits, Euclidean parameter k)
+4. Lead Pattern Length (3-17 steps, offset for polyrhythm)
+5. Lead Hit Density (1-17 hits, creates pattern complexity)
 
-PERFORMANCE (4 pots):
-8. Filter Cutoff (main performance control)
-9. Filter Resonance (Moog scream)
-10. Tempo (80-180 BPM for live energy)
-11. Saturation Drive (0-100% for PHAT bass)
+GLOBAL CONTROLS (2 pots):
+6. Tempo (80-180 BPM, affects all voices)
+7. Mutation Rate (0-50%, applies to both Turing Machines)
+```
 
-HARDCODED:
+### Future Expansion (4+ Pots Available)
+
+```
+POTENTIAL ADDITIONS:
+- Per-voice mutation rates (separate bass/lead control)
+- Turing Machine loop length (8-32 bits per voice)
+- Saturation drive control (currently soft-clipping at fixed level)
+- Scale selection (currently hardcoded to Natural Minor)
+- LFO rate/depth for filter modulation
+- Delay controls (if Phase 3 implemented)
+```
+
+### Hardcoded Parameters
+
+```
+AUDIO:
 - Master volume: 0.75 (safe level)
-- Scale: Minor pentatonic
-- Root notes: C2 (bass), C4 (lead)
-- Glide: 150ms (bass), 50ms (lead)
-- Swing: Randomized 10-25% per beat
-- Delay: OFF (Phase 3 if desired)
+- Saturation: Soft-clipping enabled (rational function approximation)
+- Sample rate: 44.1 kHz
+
+GENERATIVE:
+- Scale: Natural Minor (Aeolian, index 1 in quantizer)
+- Root notes: 65 Hz (C2 bass), 260 Hz (C4 lead)
+- Octave range: 2.0 (bass), 3.0 (lead)
+- Glide: Built into oscillator pitch smoothing
+- Swing: Not implemented yet
+
+SYNTHESIS:
+- Oscillators per voice: 2 (detuned +5¢ for thickness)
+- Waveforms: Saw (bass), Square (lead)
+- Envelope: AD (attack-decay) per voice
+- Delay: OFF (Phase 3 feature)
 ```
 
 ---

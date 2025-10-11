@@ -37,13 +37,16 @@ heapless = "0.9.1"
 micromath = { version = "2.1.0", default-features = false }
 paste = "1.0.15"
 
-[features]
-profile = []
-
 [profile.dev]
-# Rust debug is too slow.
-# For debug builds always builds with some optimization
-opt-level = "s"
+# Maximum performance for audio DSP
+opt-level = 3
+lto = "fat"               # Maximum runtime performance
+codegen-units = 1         # Better cross-crate optimization
+overflow-checks = false   # Remove runtime checks
+debug-assertions = false  # Remove debug overhead
+incremental = false       # Better with LTO
+panic = "abort"           # Standard for no_std/embedded
+# strip = "symbols"         # Remove symbol table (keeps debuginfo)
 
 [profile.release]
 codegen-units    = 1     # LLVM can perform better optimizations using a single thread

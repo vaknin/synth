@@ -285,3 +285,59 @@ pub fn map_lfo_depth(normalized: f32) -> Message {
     );
     Message::SetFilterLfoDepth(depth)
 }
+
+// === GENERATIVE PARAMETER MAPPING ===
+
+/// Map normalized value (0.0-1.0) to tempo in BPM.
+pub fn map_tempo(normalized: f32) -> Message {
+    use crate::config::{CLOCK_BPM_MAX, CLOCK_BPM_MIN};
+
+    let bpm = map_range(
+        normalized,
+        Curve::Linear,
+        Range::Linear {
+            min: CLOCK_BPM_MIN,
+            max: CLOCK_BPM_MAX,
+        },
+    );
+    Message::SetTempo(bpm)
+}
+
+/// Map normalized value (0.0-1.0) to bass Euclidean pattern length (4-16 steps).
+pub fn map_bass_euclidean_length(normalized: f32) -> Message {
+    let length = map_range(normalized, Curve::Linear, Range::Linear { min: 4.0, max: 16.0 });
+    Message::SetBassEuclideanLength(length.round() as usize)
+}
+
+/// Map normalized value (0.0-1.0) to bass Euclidean hits (1-16).
+pub fn map_bass_euclidean_hits(normalized: f32) -> Message {
+    let hits = map_range(normalized, Curve::Linear, Range::Linear { min: 1.0, max: 16.0 });
+    Message::SetBassEuclideanHits(hits.round() as usize)
+}
+
+/// Map normalized value (0.0-1.0) to lead Euclidean pattern length (3-17 steps).
+pub fn map_lead_euclidean_length(normalized: f32) -> Message {
+    let length = map_range(normalized, Curve::Linear, Range::Linear { min: 3.0, max: 17.0 });
+    Message::SetLeadEuclideanLength(length.round() as usize)
+}
+
+/// Map normalized value (0.0-1.0) to lead Euclidean hits (1-17).
+pub fn map_lead_euclidean_hits(normalized: f32) -> Message {
+    let hits = map_range(normalized, Curve::Linear, Range::Linear { min: 1.0, max: 17.0 });
+    Message::SetLeadEuclideanHits(hits.round() as usize)
+}
+
+/// Map normalized value (0.0-1.0) to Turing Machine mutation rate (0-50%).
+pub fn map_mutation_rate(normalized: f32) -> Message {
+    use crate::config::TURING_MUTATION_MAX;
+
+    let rate = map_range(
+        normalized,
+        Curve::Linear,
+        Range::Linear {
+            min: 0.0,
+            max: TURING_MUTATION_MAX,
+        },
+    );
+    Message::SetMutationRate(rate)
+}

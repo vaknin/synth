@@ -9,8 +9,9 @@ pub mod task;
 
 // Re-export commonly used items
 pub use pot::{
-    map_cutoff, map_lfo_depth, map_lfo_rate, map_master_pitch, map_osc_detune, map_osc_level,
-    map_resonance, Potentiometer,
+    map_bass_euclidean_hits, map_bass_euclidean_length, map_cutoff, map_lead_euclidean_hits,
+    map_lead_euclidean_length, map_lfo_depth, map_lfo_rate, map_master_pitch, map_mutation_rate,
+    map_osc_detune, map_osc_level, map_resonance, map_tempo, Potentiometer,
 };
 pub use task::pot_task;
 
