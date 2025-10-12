@@ -57,6 +57,16 @@ impl ADEnvelope {
         self.level = 0.0;
     }
 
+    /// Set attack time dynamically.
+    ///
+    /// # Arguments
+    /// * `attack_ms` - Attack time in milliseconds
+    #[inline]
+    pub fn set_attack_ms(&mut self, attack_ms: f32) {
+        let attack_samples = attack_ms * SAMPLES_PER_MS;
+        self.attack_increment = 1.0 / attack_samples;
+    }
+
     /// Set decay time dynamically (for envelope randomization).
     ///
     /// # Arguments

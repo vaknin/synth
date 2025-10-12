@@ -2,8 +2,8 @@
 
 use crate::config::*;
 use crate::controls::{
-    map_bass_euclidean_hits, map_cutoff, map_lead_euclidean_hits, map_lead_euclidean_length,
-    map_mutation_rate, map_portamento, map_resonance, map_tempo, CtrlSender, Potentiometer,
+    map_attack, map_bass_euclidean_hits, map_cutoff, map_decay, map_filter_envelope_depth,
+    map_lead_euclidean_hits, map_resonance, map_tempo, CtrlSender, Potentiometer,
 };
 use crate::hardware::{AdcBus, AnyAdcPin};
 use embassy_time::{Duration, Timer};
@@ -13,15 +13,21 @@ use embassy_time::{Duration, Timer};
 /// Owns the ADC peripheral and all pot pins. Each pot has independent
 /// signal processing state (EMA filter, deadband) but shares the hardware.
 ///
-/// Current 8-pot setup (generative phase):
-/// - Pot 1 (GPIO1): Filter Cutoff
-/// - Pot 2 (GPIO2): Filter Resonance
-/// - Pot 3 (GPIO3): Tempo
-/// - Pot 4 (GPIO4): Mutation Rate
-/// - Pot 5 (GPIO5): Portamento Time (pitch glide speed)
-/// - Pot 6 (GPIO6): Lead Pattern Length
-/// - Pot 7 (GPIO7): Bass Hit Density (pot min = mute, length fixed)
-/// - Pot 8 (GPIO8): Lead Hit Density (pot min = mute)
+/// Current 8-pot setup (curated generative instrument):
+/// - Pot 1 (GPIO1): Filter Cutoff (main performance control)
+/// - Pot 2 (GPIO2): Filter Resonance (Moog character)
+/// - Pot 3 (GPIO3): Filter Envelope Depth (rhythm-synced pluck intensity)
+/// - Pot 4 (GPIO4): Envelope Attack (1-200ms, percussive to pad)
+/// - Pot 5 (GPIO5): Envelope Decay (50-2000ms, staccato to sustain)
+/// - Pot 6 (GPIO6): Bass Hit Density (0-8, length fixed at 8)
+/// - Pot 7 (GPIO7): Lead Hit Density (0-16, length fixed at 16)
+/// - Pot 8 (GPIO8): Tempo (global clock, 20-220 BPM)
+///
+/// Fixed generative parameters (optimal values, no pots):
+/// - Bass: 8-step pattern, 10-bit Turing, 4% mutation
+/// - Lead: 16-step pattern, 20-bit Turing, 28% mutation
+/// - Scale: Phrygian (dark, hypnotic, perfect for techno)
+/// - Portamento: 0.996 coefficient (~60ms glide, melodic but electronic)
 ///
 /// # Arguments
 /// * `sender` - Embassy channel sender for control messages
@@ -33,12 +39,12 @@ pub async fn pot_task(sender: CtrlSender, mut adc_bus: AdcBus, mut pins: [AnyAdc
     let mut pots = [
         Potentiometer::new(map_cutoff),                // Pot 1 (GPIO1)
         Potentiometer::new(map_resonance),             // Pot 2 (GPIO2)
-        Potentiometer::new(map_tempo),                 // Pot 3 (GPIO3)
-        Potentiometer::new(map_mutation_rate),         // Pot 4 (GPIO4)
-        Potentiometer::new(map_portamento),            // Pot 5 (GPIO5)
-        Potentiometer::new(map_lead_euclidean_length), // Pot 6 (GPIO6)
-        Potentiometer::new(map_bass_euclidean_hits),   // Pot 7 (GPIO7)
-        Potentiometer::new(map_lead_euclidean_hits),   // Pot 8 (GPIO8)
+        Potentiometer::new(map_filter_envelope_depth), // Pot 3 (GPIO3)
+        Potentiometer::new(map_attack),                // Pot 4 (GPIO4)
+        Potentiometer::new(map_decay),                 // Pot 5 (GPIO5)
+        Potentiometer::new(map_bass_euclidean_hits),   // Pot 6 (GPIO6)
+        Potentiometer::new(map_lead_euclidean_hits),   // Pot 7 (GPIO7)
+        Potentiometer::new(map_tempo),                 // Pot 8 (GPIO8)
     ];
 
     loop {

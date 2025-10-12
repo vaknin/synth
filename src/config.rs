@@ -263,6 +263,10 @@ pub const EUCLIDEAN_INITIAL_HITS: usize = 1;
 /// Standard 4/4 bar subdivision for solid rhythmic foundation.
 pub const BASS_EUCLIDEAN_LENGTH: usize = 8;
 
+/// Lead voice euclidean pattern length (fixed, no pot control).
+/// Creates clean 8:16 polyrhythm with bass for danceable grooves.
+pub const LEAD_EUCLIDEAN_LENGTH: usize = 16;
+
 /// Initial euclidean length for lead voice (overwritten by pot ADC).
 pub const EUCLIDEAN_INITIAL_LENGTH: usize = 8;
 
@@ -280,6 +284,14 @@ pub const TURING_LOOP_LENGTH_MAX: usize = 32;
 /// 16 bits = medium-length melodic phrases.
 pub const TURING_LOOP_LENGTH_DEFAULT: usize = 16;
 
+/// Bass voice Turing loop length (fixed, no pot control).
+/// 10 bits = medium-short phrases for grounding, stable bass foundation.
+pub const BASS_TURING_LOOP_LENGTH: usize = 10;
+
+/// Lead voice Turing loop length (fixed, no pot control).
+/// 20 bits = medium-long evolving phrases without excessive randomness.
+pub const LEAD_TURING_LOOP_LENGTH: usize = 20;
+
 /// Maximum mutation rate (probability per step, 0.0-0.5).
 /// 0.5 = 50% chance to flip each bit (maximum useful chaos).
 pub const TURING_MUTATION_MAX: f32 = 0.5;
@@ -287,6 +299,24 @@ pub const TURING_MUTATION_MAX: f32 = 0.5;
 /// Default mutation rate on initialization.
 /// 0.05 = 5% mutation (slowly evolving, mostly stable).
 pub const TURING_MUTATION_DEFAULT: f32 = 0.05;
+
+/// Bass voice mutation rate (fixed, no pot control).
+/// 4% = stable anchor, slowly evolving bass patterns.
+pub const BASS_MUTATION_RATE: f32 = 0.04;
+
+/// Lead voice mutation rate (fixed, no pot control).
+/// 28% = melodic exploration without excessive chaos.
+pub const LEAD_MUTATION_RATE: f32 = 0.28;
+
+// === Harmonic Anchoring ===
+
+/// Bass voice harmonic anchoring interval (steps).
+/// Returns to root note every 8 steps for solid tonal foundation.
+pub const BASS_ANCHOR_INTERVAL: usize = 8;
+
+/// Lead voice harmonic anchoring interval (steps).
+/// Returns to root note every 16 steps for melodic resolution points.
+pub const LEAD_ANCHOR_INTERVAL: usize = 16;
 
 // === Master Clock ===
 
@@ -316,16 +346,42 @@ pub const CLOCK_TEMPO_SLEW_MS: f32 = 500.0;
 
 /// Envelope attack time in milliseconds (fixed).
 /// Fast attack for percussive, punchy articulation.
-pub const ENVELOPE_ATTACK_MS: f32 = 5.0;
+pub const ENVELOPE_ATTACK_MS: f32 = 10.0;
 
 /// Default envelope decay time in milliseconds.
 /// Sustained decay for flowing generative melodies with overlapping phrases.
 pub const ENVELOPE_DEFAULT_DECAY_MS: f32 = 400.0;
 
 /// Minimum envelope decay time for randomization.
-/// Short end of dynamic decay range for rhythmic articulation.
-pub const ENVELOPE_DECAY_MIN_MS: f32 = 300.0;
+/// Short end of dynamic decay range for rhythmic, percussive articulation.
+pub const ENVELOPE_DECAY_MIN_MS: f32 = 1000.0;
 
 /// Maximum envelope decay time for randomization.
-/// Long end of dynamic decay range for sustained, pad-like phrases.
-pub const ENVELOPE_DECAY_MAX_MS: f32 = 600.0;
+/// Long end of dynamic decay range for sustained, flowing phrases.
+pub const ENVELOPE_DECAY_MAX_MS: f32 = 1500.0;
+
+/// Pot-controllable attack range: minimum (instant, percussive).
+pub const ENVELOPE_ATTACK_POT_MIN_MS: f32 = 1.0;
+
+/// Pot-controllable attack range: maximum (soft, pad-like).
+pub const ENVELOPE_ATTACK_POT_MAX_MS: f32 = 200.0;
+
+/// Pot-controllable decay range: minimum (short staccato).
+pub const ENVELOPE_DECAY_POT_MIN_MS: f32 = 50.0;
+
+/// Pot-controllable decay range: maximum (long sustain for melodies).
+pub const ENVELOPE_DECAY_POT_MAX_MS: f32 = 2000.0;
+
+// === Rhythm-Synced Filter ===
+
+/// Maximum filter envelope depth in Hz (pot-controlled from 0 to this value).
+/// Filter jumps by this amount on Euclidean gate, then decays back to baseline.
+pub const FILTER_ENVELOPE_DEPTH_MAX: f32 = 500.0;
+
+/// Filter envelope decay coefficient (exponential decay).
+/// 0.992 provides tempo-synced decay (~200ms at buffer rate ~172 Hz).
+pub const FILTER_ENVELOPE_DECAY_COEFF: f32 = 0.992;
+
+/// Turing-driven filter modulation range in Hz.
+/// Turing register state creates ±100 Hz slow wander around baseline cutoff.
+pub const FILTER_TURING_MODULATION_RANGE: f32 = 100.0;

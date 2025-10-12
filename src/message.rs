@@ -42,18 +42,24 @@ pub enum Message {
     /// Set global tempo in BPM
     SetTempo(f32),
 
-    /// Set bass Euclidean hits (0 = mute, length fixed)
+    /// Set bass Euclidean hits (0 = mute, length fixed at 8)
     SetBassEuclideanHits(usize),
 
-    /// Set lead Euclidean pattern length in steps
-    SetLeadEuclideanLength(usize),
-
-    /// Set lead Euclidean hits (0 = mute)
+    /// Set lead Euclidean hits (0 = mute, length fixed at 16)
     SetLeadEuclideanHits(usize),
 
-    /// Set Turing Machine mutation rate (shared for both voices)
-    SetMutationRate(f32),
+    /// Set musical scale for quantizer (0-11 for 12 scales)
+    SetScale(usize),
 
     /// Set portamento smoothing coefficient (0.95-0.998, shared for all voices)
     SetPortamento(f32),
+
+    /// Set filter envelope depth (0.0-1.0, controls rhythm-synced filter pluck intensity)
+    SetFilterEnvelopeDepth(f32),
+
+    /// Set envelope attack time in milliseconds (shared for all voices)
+    SetAttack(f32),
+
+    /// Set envelope decay time in milliseconds (shared for all voices)
+    SetDecay(f32),
 }

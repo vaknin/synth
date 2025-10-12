@@ -14,8 +14,8 @@ use crate::noise::WhiteNoise;
 /// 32-bit shift register with probabilistic mutations.
 /// Outputs normalized value for scale quantization.
 pub struct TuringMachine {
-    /// 32-bit shift register state (private)
-    register: u32,
+    /// 32-bit shift register state (used for filter modulation)
+    pub register: u32,
     /// Active loop length in bits (2-32)
     pub loop_length: usize,
     /// Mutation probability per step (0.0-0.5)

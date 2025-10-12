@@ -11,13 +11,13 @@ const MAX_STEPS: usize = 32;
 /// Patterns are precomputed when parameters change (not per-step).
 pub struct EuclideanRhythm {
     /// Precomputed pattern buffer (true = hit, false = rest)
-    pattern: [bool; MAX_STEPS],
+    pub pattern: [bool; MAX_STEPS],
     /// Current pattern length (n steps)
     pub length: usize,
     /// Number of hits (k)
     pub hits: usize,
     /// Current step position [0, length)
-    position: usize,
+    pub position: usize,
 }
 
 impl EuclideanRhythm {

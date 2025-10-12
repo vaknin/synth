@@ -319,32 +319,78 @@ pub fn map_bass_euclidean_hits(normalized: f32) -> Message {
     Message::SetBassEuclideanHits(hits.round() as usize)
 }
 
-/// Map normalized value (0.0-1.0) to lead Euclidean pattern length (3-17 steps).
-pub fn map_lead_euclidean_length(normalized: f32) -> Message {
-    let length = map_range(normalized, Curve::Linear, Range::Linear { min: 3.0, max: 17.0 });
-    Message::SetLeadEuclideanLength(length.round() as usize)
-}
-
-/// Map normalized value (0.0-1.0) to lead Euclidean hits (0-17).
+/// Map normalized value (0.0-1.0) to lead Euclidean hits (0-16).
 /// Value of 0 mutes the voice (rhythm advances silently to keep polyrhythms locked).
+/// Lead length is fixed at 16 steps.
 pub fn map_lead_euclidean_hits(normalized: f32) -> Message {
-    let hits = map_range(normalized, Curve::Linear, Range::Linear { min: 0.0, max: 17.0 });
-    Message::SetLeadEuclideanHits(hits.round() as usize)
-}
+    use crate::config::LEAD_EUCLIDEAN_LENGTH;
 
-/// Map normalized value (0.0-1.0) to Turing Machine mutation rate (0-50%).
-pub fn map_mutation_rate(normalized: f32) -> Message {
-    use crate::config::TURING_MUTATION_MAX;
-
-    let rate = map_range(
+    let hits = map_range(
         normalized,
         Curve::Linear,
         Range::Linear {
             min: 0.0,
-            max: TURING_MUTATION_MAX,
+            max: LEAD_EUCLIDEAN_LENGTH as f32,
         },
     );
-    Message::SetMutationRate(rate)
+    Message::SetLeadEuclideanHits(hits.round() as usize)
+}
+
+/// Map normalized value (0.0-1.0) to musical scale (0-11 for 12 scales).
+///
+/// Scale order: Major, Natural Minor, Harmonic Minor, Pentatonic Minor, Pentatonic Major,
+/// Blues, Dorian, Phrygian, Chromatic, Whole Tone, Diminished, Japanese Pentatonic.
+pub fn map_scale(normalized: f32) -> Message {
+    let scale_idx = (normalized * 11.99).floor() as usize;
+    Message::SetScale(scale_idx.min(11))
+}
+
+/// Map normalized value (0.0-1.0) to filter envelope depth.
+///
+/// Controls the intensity of rhythm-synced filter plucks (0 = static, 1 = dramatic jumps).
+pub fn map_filter_envelope_depth(normalized: f32) -> Message {
+    let depth = map_range(
+        normalized,
+        Curve::Linear,
+        Range::Linear { min: 0.0, max: 1.0 },
+    );
+    Message::SetFilterEnvelopeDepth(depth)
+}
+
+/// Map normalized value (0.0-1.0) to envelope attack time.
+///
+/// Uses Power + Linear for fine control at fast attacks (percussive territory),
+/// with smooth expansion toward pad-like attacks.
+pub fn map_attack(normalized: f32) -> Message {
+    use crate::config::{ENVELOPE_ATTACK_POT_MIN_MS, ENVELOPE_ATTACK_POT_MAX_MS};
+
+    let attack_ms = map_range(
+        normalized,
+        Curve::Power,
+        Range::Linear {
+            min: ENVELOPE_ATTACK_POT_MIN_MS,
+            max: ENVELOPE_ATTACK_POT_MAX_MS,
+        },
+    );
+    Message::SetAttack(attack_ms)
+}
+
+/// Map normalized value (0.0-1.0) to envelope decay time.
+///
+/// Uses Power + Linear for fine control at short decays (staccato),
+/// with smooth expansion toward long sustained notes.
+pub fn map_decay(normalized: f32) -> Message {
+    use crate::config::{ENVELOPE_DECAY_POT_MIN_MS, ENVELOPE_DECAY_POT_MAX_MS};
+
+    let decay_ms = map_range(
+        normalized,
+        Curve::Power,
+        Range::Linear {
+            min: ENVELOPE_DECAY_POT_MIN_MS,
+            max: ENVELOPE_DECAY_POT_MAX_MS,
+        },
+    );
+    Message::SetDecay(decay_ms)
 }
 
 /// Map normalized value (0.0-1.0) to portamento smoothing coefficient.

@@ -1,7 +1,9 @@
 //! Engine module: manages generative voices, processes messages, renders audio.
 
 use crate::clock::Clock;
-use crate::config::{MASTER_GAIN, SATURATION_DRIVE};
+use crate::config::{
+    FILTER_ENVELOPE_DECAY_COEFF, FILTER_TURING_MODULATION_RANGE, MASTER_GAIN, SATURATION_DRIVE,
+};
 use crate::filter::MoogLadderFilter;
 use crate::lfo::LFO;
 use crate::message::Message;
@@ -51,20 +53,45 @@ pub struct Engine {
     /// Filter cutoff LFO
     filter_lfo: LFO,
 
-    /// Base filter cutoff from pot (before LFO modulation)
+    /// Base filter cutoff from pot (before modulation)
     base_cutoff: f32,
 
     /// LFO modulation range in Hz (depth pot → Hz range)
     lfo_cutoff_range: f32,
+
+    /// Filter envelope depth in Hz (pot-controlled)
+    filter_envelope_depth: f32,
+
+    /// Current filter envelope offset in Hz (decays to 0)
+    filter_envelope_offset: f32,
+
+    /// Turing-driven filter modulation offset in Hz
+    filter_turing_offset: f32,
 }
 
 impl Engine {
     /// Create new engine with generative voices.
     pub fn new(receiver: ChannelReceiver) -> Self {
+        // Create voices with fixed scale (Phrygian) and portamento
+        let mut bass_voice = Voice::bass();
+        let mut lead_voice = Voice::lead();
+
+        // Set Phrygian scale (index 7): dark, hypnotic, perfect for techno
+        let phrygian_normalized = 7.0 / 11.0;
+        bass_voice.quantizer.set_scale(phrygian_normalized);
+        lead_voice.quantizer.set_scale(phrygian_normalized);
+
+        // Set portamento to 0.996 (~60ms glide, melodic but electronic)
+        const TECHNO_PORTAMENTO: f32 = 0.996;
+        bass_voice.osc1.set_portamento_coeff(TECHNO_PORTAMENTO);
+        bass_voice.osc2.set_portamento_coeff(TECHNO_PORTAMENTO);
+        lead_voice.osc1.set_portamento_coeff(TECHNO_PORTAMENTO);
+        lead_voice.osc2.set_portamento_coeff(TECHNO_PORTAMENTO);
+
         Self {
             clock: Clock::new(),
-            bass_voice: Voice::bass(),
-            lead_voice: Voice::lead(),
+            bass_voice,
+            lead_voice,
             consumer: receiver,
             soft_start_gain: {
                 let mut gain = Slew::with_coeff(0.0, 0.99);
@@ -81,6 +108,9 @@ impl Engine {
             ),
             base_cutoff: crate::config::FILTER_CUTOFF_MIN,
             lfo_cutoff_range: 0.0,
+            filter_envelope_depth: 0.0,
+            filter_envelope_offset: 0.0,
+            filter_turing_offset: 0.0,
         }
     }
 
@@ -114,17 +144,15 @@ impl Engine {
                     self.bass_voice.euclidean.set_hits(hits);
                 }
 
-                Message::SetLeadEuclideanLength(length) => {
-                    self.lead_voice.euclidean.set_length(length);
-                }
-
                 Message::SetLeadEuclideanHits(hits) => {
                     self.lead_voice.euclidean.set_hits(hits);
                 }
 
-                Message::SetMutationRate(rate) => {
-                    self.bass_voice.turing.set_mutation_rate(rate);
-                    self.lead_voice.turing.set_mutation_rate(rate);
+                Message::SetScale(scale_idx) => {
+                    // Apply same scale to both voices (normalized 0.0-1.0)
+                    let normalized = scale_idx as f32 / 11.0;
+                    self.bass_voice.quantizer.set_scale(normalized);
+                    self.lead_voice.quantizer.set_scale(normalized);
                 }
 
                 Message::SetPortamento(coeff) => {
@@ -132,6 +160,22 @@ impl Engine {
                     self.bass_voice.osc2.set_portamento_coeff(coeff);
                     self.lead_voice.osc1.set_portamento_coeff(coeff);
                     self.lead_voice.osc2.set_portamento_coeff(coeff);
+                }
+
+                Message::SetFilterEnvelopeDepth(depth) => {
+                    // depth is 0.0-1.0, scale to Hz using config constant
+                    self.filter_envelope_depth =
+                        depth * crate::config::FILTER_ENVELOPE_DEPTH_MAX;
+                }
+
+                Message::SetAttack(attack_ms) => {
+                    self.bass_voice.envelope.set_attack_ms(attack_ms);
+                    self.lead_voice.envelope.set_attack_ms(attack_ms);
+                }
+
+                Message::SetDecay(decay_ms) => {
+                    self.bass_voice.envelope.set_decay_ms(decay_ms);
+                    self.lead_voice.envelope.set_decay_ms(decay_ms);
                 }
 
                 _ => {} // Ignore old oscillator messages
@@ -144,9 +188,36 @@ impl Engine {
     fn update_buffer_parameters(&mut self) {
         // Clock-driven generative steps
         if self.clock.tick() {
+            // Check if either voice fires a gate (trigger filter envelope)
+            // Read current position before stepping (step() advances position)
+            let bass_gate_position = self.bass_voice.euclidean.position;
+            let lead_gate_position = self.lead_voice.euclidean.position;
+            let bass_gate = self.bass_voice.euclidean.pattern[bass_gate_position];
+            let lead_gate = self.lead_voice.euclidean.pattern[lead_gate_position];
+
+            if bass_gate || lead_gate {
+                // Trigger filter envelope jump (Design 1: rhythm-synced filter)
+                self.filter_envelope_offset = self.filter_envelope_depth;
+            }
+
+            // Step voices (advances euclidean position, generates notes)
             self.bass_voice.step();
             self.lead_voice.step();
+
+            // Update Turing-driven filter modulation (Design 2: slow baseline wander)
+            // Average both Turing states for smooth, evolving filter character
+            let bass_turing_norm = self.bass_voice.turing.register as f32
+                / ((1 << self.bass_voice.turing.loop_length) - 1) as f32;
+            let lead_turing_norm = self.lead_voice.turing.register as f32
+                / ((1 << self.lead_voice.turing.loop_length) - 1) as f32;
+            let turing_avg = (bass_turing_norm + lead_turing_norm) * 0.5;
+            // Map 0.0-1.0 → ±FILTER_TURING_MODULATION_RANGE Hz
+            self.filter_turing_offset =
+                (turing_avg - 0.5) * (FILTER_TURING_MODULATION_RANGE * 2.0);
         }
+
+        // Decay filter envelope exponentially at buffer rate
+        self.filter_envelope_offset *= FILTER_ENVELOPE_DECAY_COEFF;
 
         // Voice parameter updates (oscillator pitch smoothing)
         self.bass_voice.osc1.update_parameters();
@@ -154,11 +225,13 @@ impl Engine {
         self.lead_voice.osc1.update_parameters();
         self.lead_voice.osc2.update_parameters();
 
-        // Filter LFO modulation (DISABLED - saves ~10-15 cycles/buffer)
-        // let lfo_value = self.filter_lfo.tick();
-        // let modulated_cutoff = self.base_cutoff + (lfo_value * self.lfo_cutoff_range);
-        // self.filter.set_cutoff(modulated_cutoff);
-        self.filter.set_cutoff(self.base_cutoff);
+        // Apply combined filter modulation: base + envelope + turing
+        let modulated_cutoff =
+            self.base_cutoff + self.filter_envelope_offset + self.filter_turing_offset;
+
+        // Clamp to safe range (20 Hz - 20 kHz)
+        self.filter
+            .set_cutoff(modulated_cutoff.max(20.0).min(20000.0));
         self.filter.update_coefficients();
     }
 
