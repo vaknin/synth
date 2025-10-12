@@ -1,6 +1,7 @@
 //! Engine module: manages oscillators, processes messages, renders audio.
 
-use crate::config::{FREQUENCY_MIN, MASTER_GAIN};
+use crate::arpeggiator::Arpeggiator;
+use crate::config::MASTER_GAIN;
 use crate::filter::MoogLadderFilter;
 use crate::lfo::LFO;
 use crate::message::Message;
@@ -10,8 +11,8 @@ use crate::{AudioStream, ChannelReceiver, I16_MAX_F32};
 
 /// Main synth engine managing direct oscillators (monophonic architecture).
 pub struct Engine {
-    /// Array of 4 oscillators [Osc1(Sine), Osc2(Saw), Osc3(Square), Sub(Sine)]
-    oscillators: [Oscillator; 4],
+    /// Array of 2 oscillators [Lead(Saw), Bass(Square)]
+    oscillators: [Oscillator; 2],
 
     /// Cached reciprocal of level sum for fast normalization (multiply instead of divide)
     /// Smoothed at audio rate to prevent zipper noise when oscillator levels change
@@ -35,6 +36,9 @@ pub struct Engine {
 
     /// LFO modulation range in Hz (depth pot → Hz range)
     lfo_cutoff_range: f32,
+
+    /// Arpeggiator (clock-driven melody generation)
+    arpeggiator: Arpeggiator,
 
     /// Profiling: accumulated statistics (only compiled with 'profile' feature)
     #[cfg(feature = "profile")]
@@ -60,18 +64,11 @@ impl Engine {
     /// Pot messages arrive within ~20ms and Slew smooths to actual positions.
     pub fn new(receiver: ChannelReceiver) -> Self {
         Self {
-            // Array of 4 oscillators: Sine, Saw, Square, Sub (-1 oct)
-            // All start silent (level=0.0), pot messages arrive in ~20ms
+            // Array of 2 oscillators: Lead (Saw), Bass (Square)
+            // Frequencies controlled by arpeggiator
             oscillators: [
-                Oscillator::new(Waveform::Sine),
-                Oscillator::new(Waveform::Saw),
-                Oscillator::new(Waveform::Square),
-                {
-                    let mut sub = Oscillator::new(Waveform::Square);
-                    sub.set_frequency(FREQUENCY_MIN / 4.0); // Sub at -1 octave
-                    sub.set_level(0.0); // Full level (no pot control yet)
-                    sub
-                },
+                Oscillator::new(Waveform::Saw),     // Lead
+                Oscillator::new(Waveform::Square),  // Bass
             ],
             // Normalization factor: starts at 1.0 (neutral), smoothed at audio rate to prevent zipper
             level_sum_reciprocal: Slew::new(1.0),
@@ -92,6 +89,7 @@ impl Engine {
             ),
             base_cutoff: crate::config::FILTER_CUTOFF_MIN,
             lfo_cutoff_range: 0.0,
+            arpeggiator: Arpeggiator::new(),
             #[cfg(feature = "profile")]
             profile_stats: ProfileStats {
                 buffer_count: 0,
@@ -102,18 +100,12 @@ impl Engine {
         }
     }
 
-    /// Set master pitch for all oscillators (respects per-oscillator detune).
+    /// Set master pitch (arpeggiator root frequency).
     ///
     /// # Arguments
-    /// * `frequency` - Base frequency in Hz (sub-oscillator plays at half frequency)
+    /// * `frequency` - Root frequency in Hz (arpeggiator transposes from this)
     fn set_master_pitch(&mut self, frequency: f32) {
-        // Update Osc1, Osc2, Osc3 with base frequency
-        for osc in &mut self.oscillators[0..3] {
-            osc.set_frequency(frequency);
-        }
-
-        // Sub-oscillator plays at -1 octave (half frequency)
-        self.oscillators[3].set_frequency(frequency / 2.0);
+        self.arpeggiator.set_root_freq(frequency);
     }
 
     /// BUFFER RATE (~172 Hz): Drain control message queue and update parameter targets.
@@ -181,6 +173,23 @@ impl Engine {
                     // Convert depth (0.0-1.0) to Hz range (±2 octaves = 4× multiplier)
                     self.lfo_cutoff_range = self.base_cutoff * 3.0 * depth;
                 }
+
+                Message::SetArpRate(rate) => {
+                    self.arpeggiator.set_rate(rate);
+                }
+
+                Message::SetArpMode(mode) => {
+                    self.arpeggiator.set_mode(mode);
+                }
+
+                Message::SetArpTranspose(semitones) => {
+                    self.arpeggiator.set_transpose(semitones);
+                }
+
+                Message::SetArpChord(_chord_index) => {
+                    // Future: Switch between hardcoded chord patterns
+                    // For now, only C major is implemented
+                }
             }
         }
     }
@@ -191,6 +200,21 @@ impl Engine {
     /// that don't need audio-rate smoothing. LFO modulation applied here.
     #[inline]
     fn update_buffer_parameters(&mut self) {
+        // Arpeggiator: tick at buffer rate, route to Lead and Bass oscillators
+        let arp_note = self.arpeggiator.tick();
+
+        // Lead oscillator: always set frequency, gate controls level
+        self.oscillators[0].set_frequency(arp_note.lead_freq);
+        self.oscillators[0].set_level(if arp_note.gate_active { 1.0 } else { 0.0 });
+
+        // Bass oscillator: only when bass_active, gate controls level
+        if arp_note.bass_active {
+            self.oscillators[1].set_frequency(self.arpeggiator.bass_freq);
+            self.oscillators[1].set_level(if arp_note.gate_active { 1.0 } else { 0.0 });
+        } else {
+            self.oscillators[1].set_level(0.0); // Silent when not bass beat
+        }
+
         // Oscillator parameters: No-op (level/pitch smoothed at audio rate for responsiveness)
         for osc in &mut self.oscillators {
             osc.update_parameters();

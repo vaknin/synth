@@ -193,11 +193,20 @@ pub const LFO_FREQUENCY_DEFAULT: f32 = 0.1;
 /// Zero depth = no modulation until pot message arrives.
 pub const LFO_DEPTH_DEFAULT: f32 = 0.0;
 
-// === Generative Synthesis ===
+// === Arpeggiator ===
 
-/// Minimum octave range for generative voices (smoother, stepwise motion).
-pub const GENERATIVE_OCTAVE_RANGE_MIN: f32 = 1.0;
+/// Minimum arpeggiator clock rate (Hz).
+/// 1 Hz = 1 note per second (slow, spacious arpeggios).
+pub const ARP_RATE_MIN: f32 = 1.0;
 
-/// Maximum octave range for generative voices (dramatic, wide jumps).
-/// Determines lookup table size: ±(MAX × 12 semitones) = ±48 semitones.
-pub const GENERATIVE_OCTAVE_RANGE_MAX: f32 = 4.0;
+/// Maximum arpeggiator clock rate (Hz).
+/// 20 Hz = 20 notes per second (fast, rhythmic patterns).
+pub const ARP_RATE_MAX: f32 = 20.0;
+
+/// Default arpeggiator clock rate (Hz).
+/// 4 Hz = 4 notes per second (moderate melodic pace, good starting point).
+pub const ARP_RATE_DEFAULT: f32 = 4.0;
+
+/// Arpeggiator gate length (0.0-1.0).
+/// 0.8 = 80% note length, 20% silence for articulation (classic arp feel).
+pub const ARP_GATE_LENGTH: f32 = 0.8;

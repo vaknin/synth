@@ -1,9 +1,11 @@
 //! Control tasks: potentiometers and future encoders.
 
 use crate::config::*;
-use crate::controls::{map_master_pitch, map_osc_detune, map_osc_level, map_resonance, CtrlSender, Potentiometer};
+use crate::controls::{
+    map_arp_mode, map_arp_rate, map_arp_transpose, map_cutoff, map_lfo_depth, map_lfo_rate,
+    map_master_pitch, map_resonance, CtrlSender, Potentiometer,
+};
 use crate::hardware::{AdcBus, AnyAdcPin};
-use crate::message::OscillatorId;
 use embassy_time::{Duration, Timer};
 
 /// Potentiometer polling task: sequentially reads all pots.
@@ -12,14 +14,14 @@ use embassy_time::{Duration, Timer};
 /// signal processing state (EMA filter, deadband) but shares the hardware.
 ///
 /// Current 8-pot setup:
-/// - Pot 0 (GPIO1): Master Pitch
-/// - Pot 1 (GPIO2): Osc1 Level
-/// - Pot 2 (GPIO3): Osc2 Detune
-/// - Pot 3 (GPIO4): Osc2 Level
-/// - Pot 4 (GPIO5): Filter Cutoff
-/// - Pot 5 (GPIO6): Filter Resonance
-/// - Pot 6 (GPIO7): Filter LFO Rate
-/// - Pot 7 (GPIO8): Filter LFO Depth
+/// - Pot 1 (GPIO1): Filter Cutoff
+/// - Pot 2 (GPIO2): Filter Resonance
+/// - Pot 3 (GPIO3): Filter LFO Rate
+/// - Pot 4 (GPIO4): Filter LFO Depth
+/// - Pot 5 (GPIO5): Arp Rate
+/// - Pot 6 (GPIO6): Arp Mode (Up/Down/UpDown/Random)
+/// - Pot 7 (GPIO7): Root Transpose (±12 semitones)
+/// - Pot 8 (GPIO8): Master Pitch
 ///
 /// # Arguments
 /// * `sender` - Embassy channel sender for control messages
@@ -29,14 +31,14 @@ use embassy_time::{Duration, Timer};
 pub async fn pot_task(sender: CtrlSender, mut adc_bus: AdcBus, mut pins: [AnyAdcPin; 8]) {
     // Create pot state objects with mapping functions
     let mut pots = [
-        Potentiometer::new(map_master_pitch),
-        Potentiometer::new(|n| map_osc_level(OscillatorId::Osc1, n)),
-        Potentiometer::new(|n| map_osc_detune(OscillatorId::Osc2, n)),
-        Potentiometer::new(|n| map_osc_level(OscillatorId::Osc2, n)),
-        Potentiometer::new(crate::controls::map_cutoff),
-        Potentiometer::new(map_resonance),
-        Potentiometer::new(crate::controls::map_lfo_rate),
-        Potentiometer::new(crate::controls::map_lfo_depth),
+        Potentiometer::new(map_cutoff),       // Pot 1 (GPIO1)
+        Potentiometer::new(map_resonance),    // Pot 2 (GPIO2)
+        Potentiometer::new(map_lfo_rate),     // Pot 3 (GPIO3)
+        Potentiometer::new(map_lfo_depth),    // Pot 4 (GPIO4)
+        Potentiometer::new(map_arp_rate),     // Pot 5 (GPIO5)
+        Potentiometer::new(map_arp_mode),     // Pot 6 (GPIO6)
+        Potentiometer::new(map_arp_transpose), // Pot 7 (GPIO7)
+        Potentiometer::new(map_master_pitch), // Pot 8 (GPIO8)
     ];
 
     loop {

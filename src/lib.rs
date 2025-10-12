@@ -9,6 +9,7 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex as ChannelMutex;
 #[macro_use]
 mod macros;
 
+pub mod arpeggiator;
 pub mod config;
 pub mod controls;
 pub mod engine;
@@ -16,6 +17,7 @@ pub mod filter;
 pub mod hardware;
 pub mod lfo;
 pub mod message;
+pub mod noise;
 pub mod oscillator;
 pub mod slew;
 

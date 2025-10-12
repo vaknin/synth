@@ -285,3 +285,48 @@ pub fn map_lfo_depth(normalized: f32) -> Message {
     );
     Message::SetFilterLfoDepth(depth)
 }
+
+/// Map normalized value (0.0-1.0) to arpeggiator rate.
+///
+/// Uses Linear + Linear for direct control of arp tempo.
+/// 1-20 Hz = 1-20 notes/second, musically useful range for arpeggios.
+pub fn map_arp_rate(normalized: f32) -> Message {
+    use crate::config::{ARP_RATE_MAX, ARP_RATE_MIN};
+
+    let rate = map_range(
+        normalized,
+        Curve::Linear,
+        Range::Linear {
+            min: ARP_RATE_MIN,
+            max: ARP_RATE_MAX,
+        },
+    );
+    Message::SetArpRate(rate)
+}
+
+/// Map normalized value (0.0-1.0) to arpeggiator mode.
+///
+/// Divides range into 4 equal zones for 4 modes (Up/Down/UpDown/Random).
+/// 0.0-0.25 = Up, 0.25-0.5 = Down, 0.5-0.75 = UpDown, 0.75-1.0 = Random
+pub fn map_arp_mode(normalized: f32) -> Message {
+    use crate::message::ArpMode;
+
+    let mode_index = ((normalized * 4.0).floor() as usize).min(3);
+    let mode = match mode_index {
+        0 => ArpMode::Up,
+        1 => ArpMode::Down,
+        2 => ArpMode::UpDown,
+        _ => ArpMode::Random,
+    };
+    Message::SetArpMode(mode)
+}
+
+/// Map normalized value (0.0-1.0) to arpeggiator root transpose.
+///
+/// Uses Quadratic + Bipolar for fine control near center (0 semitones),
+/// fast changes at edges (±12 semitones).
+/// Center at 0.5 = no transpose, pot min = -12, pot max = +12.
+pub fn map_arp_transpose(normalized: f32) -> Message {
+    let semitones = map_range(normalized, Curve::Quadratic, Range::Bipolar { range: 12.0 });
+    Message::SetArpTranspose(semitones.round() as i8)
+}

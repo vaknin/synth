@@ -221,7 +221,7 @@ impl Oscillator {
             frequency,
             sample_rate,
             waveform,
-            level: Slew::new(0.0), // Start silent - Engine will set active oscillator levels
+            level: Slew::new(1.0), // Start silent - Engine will set active oscillator levels
             detune_ratio: 1.0,     // No detune by default
         }
     }
