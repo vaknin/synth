@@ -18,7 +18,7 @@ use embassy_time::{Duration, Timer};
 /// - Pot 2 (GPIO2): Filter Resonance (Moog character)
 /// - Pot 3 (GPIO3): Filter Envelope Depth (rhythm-synced pluck intensity)
 /// - Pot 4 (GPIO4): Envelope Attack (1-200ms, percussive to pad)
-/// - Pot 5 (GPIO5): Envelope Decay (50-2000ms, staccato to sustain)
+/// - Pot 5 (GPIO5): Envelope Decay (10-2000ms, tight stabs to sustain)
 /// - Pot 6 (GPIO6): Bass Hit Density (0-8, length fixed at 8)
 /// - Pot 7 (GPIO7): Lead Hit Density (0-16, length fixed at 16)
 /// - Pot 8 (GPIO8): Tempo (global clock, 20-220 BPM)

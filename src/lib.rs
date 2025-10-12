@@ -9,6 +9,7 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex as ChannelMutex;
 #[macro_use]
 mod macros;
 
+pub mod chords;
 pub mod clock;
 pub mod config;
 pub mod controls;

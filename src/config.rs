@@ -366,8 +366,8 @@ pub const ENVELOPE_ATTACK_POT_MIN_MS: f32 = 1.0;
 /// Pot-controllable attack range: maximum (soft, pad-like).
 pub const ENVELOPE_ATTACK_POT_MAX_MS: f32 = 200.0;
 
-/// Pot-controllable decay range: minimum (short staccato).
-pub const ENVELOPE_DECAY_POT_MIN_MS: f32 = 50.0;
+/// Pot-controllable decay range: minimum (tight techno stabs).
+pub const ENVELOPE_DECAY_POT_MIN_MS: f32 = 10.0;
 
 /// Pot-controllable decay range: maximum (long sustain for melodies).
 pub const ENVELOPE_DECAY_POT_MAX_MS: f32 = 2000.0;

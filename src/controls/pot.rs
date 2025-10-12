@@ -377,7 +377,7 @@ pub fn map_attack(normalized: f32) -> Message {
 
 /// Map normalized value (0.0-1.0) to envelope decay time.
 ///
-/// Uses Power + Linear for fine control at short decays (staccato),
+/// Uses Power + Linear for fine control at short decays (tight techno stabs),
 /// with smooth expansion toward long sustained notes.
 pub fn map_decay(normalized: f32) -> Message {
     use crate::config::{ENVELOPE_DECAY_POT_MIN_MS, ENVELOPE_DECAY_POT_MAX_MS};

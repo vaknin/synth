@@ -62,6 +62,19 @@ const SCALES: [[i8; 12]; 12] = [
     [0, 1, 5, 7, 8, 12, 13, 17, 19, 20, 24, 25],    // 11: Japanese Pentatonic
 ];
 
+/// Convert semitone offset to frequency ratio using precomputed lookup table.
+///
+/// # Arguments
+/// * `semitone` - Semitone offset from root (can be negative)
+///
+/// # Returns
+/// Frequency ratio to multiply with root frequency
+#[inline]
+pub fn semitone_to_ratio(semitone: i32) -> f32 {
+    let index = (semitone + SEMITONE_OFFSET).clamp(0, (ARRAY_SIZE - 1) as i32) as usize;
+    SEMITONE_RATIOS[index]
+}
+
 /// Scale quantizer for generative pitch generation.
 ///
 /// Snaps continuous voltages to musical scales, ensuring notes are always in key.
