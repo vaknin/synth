@@ -14,6 +14,7 @@ use crate::euclidean::EuclideanRhythm;
 use crate::oscillator::{Oscillator, Waveform};
 use crate::quantizer::Quantizer;
 use crate::turing::TuringMachine;
+use micromath::F32Ext;
 
 /// Self-contained generative voice.
 ///
@@ -61,7 +62,8 @@ impl Voice {
         euclidean: Option<(usize, usize)>, // (hits, length) or None for bass
         root_freq: f32,
         octave_range: f32,
-        waveform: Waveform,
+        waveform1: Waveform,
+        waveform2: Waveform,
         turing_loop_length: usize,
         mutation_rate: f32,
         anchor_interval: usize,
@@ -70,13 +72,13 @@ impl Voice {
         use_envelope: bool,
     ) -> Self {
         // Oscillator 1: primary voice
-        let mut osc1 = Oscillator::new(waveform);
+        let mut osc1 = Oscillator::new(waveform1);
         osc1.set_frequency(root_freq);
         osc1.set_portamento_coeff(portamento_coeff);
 
-        // Oscillator 2: detuned +5¢ for thickness
-        let mut osc2 = Oscillator::new(waveform);
-        osc2.set_detune_cents(5.0);
+        // Oscillator 2: detuned +1¢ for subtle thickness
+        let mut osc2 = Oscillator::new(waveform2);
+        osc2.set_detune_cents(0.0);
         osc2.set_frequency(root_freq);
         osc2.set_portamento_coeff(portamento_coeff);
 
@@ -112,19 +114,22 @@ impl Voice {
 
     /// Create bass voice (continuous drone with slow evolution).
     ///
-    /// - Root: 65 Hz (C2) - deep bass territory
-    /// - Range: 0.5 octaves - subtle harmonic drift
-    /// - Turing: 10-bit loop, 2% mutation, ticks every 16 clocks (~2 sec @ 120 BPM)
-    /// - Anchoring: Root note every 8 Turing ticks
+    /// - Root: BASS_ROOT_HZ (deep bass territory)
+    /// - Range: BASS_OCTAVE_RANGE octaves (subtle harmonic drift)
+    /// - Turing: BASS_TURING_LOOP_LENGTH-bit loop, BASS_MUTATION_RATE mutation
+    /// - Turing tick divisor: BASS_TURING_TICK_DIVISOR (slow evolution)
+    /// - Anchoring: Root note every BASS_ANCHOR_INTERVAL Turing ticks
     /// - Euclidean: None (continuous sound)
     /// - Envelope: None (always full level)
-    /// - Portamento: 0.997 (~100ms glide)
+    /// - Portamento: BASS_PORTAMENTO_COEFF (smooth glide)
+    /// - Waveforms: Saw (bright harmonics) + Sine (pure sub-bass weight)
     pub fn bass() -> Self {
         Self::new(
             None, // No Euclidean - continuous drone
             BASS_ROOT_HZ,
             BASS_OCTAVE_RANGE,
             Waveform::Saw,
+            Waveform::Sine,
             BASS_TURING_LOOP_LENGTH,
             BASS_MUTATION_RATE,
             BASS_ANCHOR_INTERVAL,
@@ -136,19 +141,21 @@ impl Voice {
 
     /// Create lead voice (rhythmic sequencer with envelope articulation).
     ///
-    /// - Root: 260 Hz (C4) - 2 octaves above bass
-    /// - Range: 1.5 octaves - melodic without excessive jumps
-    /// - Turing: 20-bit loop, 25% mutation, ticks every clock
-    /// - Anchoring: Root note every 16 steps
+    /// - Root: LEAD_ROOT_HZ (two octaves above bass)
+    /// - Range: LEAD_OCTAVE_RANGE octaves (melodic without excessive jumps)
+    /// - Turing: LEAD_TURING_LOOP_LENGTH-bit loop, LEAD_MUTATION_RATE mutation, ticks every clock
+    /// - Anchoring: Root note every LEAD_ANCHOR_INTERVAL steps
     /// - Euclidean: Yes (rhythmic patterns via pot control)
     /// - Envelope: Yes (attack-decay articulation)
-    /// - Portamento: 0.995 (~50ms glide)
+    /// - Portamento: LEAD_PORTAMENTO_COEFF (articulate glide)
+    /// - Waveforms: Square (nasal, cutting) + Saw (harmonic richness)
     pub fn lead() -> Self {
         Self::new(
             Some((EUCLIDEAN_INITIAL_HITS, LEAD_EUCLIDEAN_LENGTH)), // Euclidean rhythm
             LEAD_ROOT_HZ,
             LEAD_OCTAVE_RANGE,
             Waveform::Square,
+            Waveform::Saw,
             LEAD_TURING_LOOP_LENGTH,
             LEAD_MUTATION_RATE,
             LEAD_ANCHOR_INTERVAL,
@@ -200,7 +207,16 @@ impl Voice {
                 self.root_freq
             } else {
                 let turing_value = self.turing.tick();
-                self.quantizer.quantize(turing_value)
+                // Bass: remap [-1, 1] → [0, 1] to keep notes above root (audible range)
+                // Lead: use full [-1, 1] range for melodic motion above/below root
+                let adjusted_value = if self.euclidean.is_none() {
+                    // Bass mode: only go up from root (prevents sub-audible frequencies)
+                    (turing_value + 1.0) * 0.5
+                } else {
+                    // Lead mode: full bipolar range
+                    turing_value
+                };
+                self.quantizer.quantize(adjusted_value)
             };
 
             // Update oscillators (portamento smooths the transition)
@@ -214,7 +230,7 @@ impl Voice {
         }
     }
 
-    /// Render one audio sample at 44.1 kHz.
+    /// Render one audio sample at audio rate.
     ///
     /// SUPER HOT PATH - called for every audio sample.
     ///

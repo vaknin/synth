@@ -181,7 +181,6 @@ impl Potentiometer {
 /// Map normalized value (0.0-1.0) to filter cutoff frequency.
 ///
 /// Uses Linear + Geometric for perceptually even octave spacing.
-/// 200-15000 Hz = 6.23 octaves, equal precision across entire range.
 pub fn map_cutoff(normalized: f32) -> Message {
     use crate::config::{FILTER_CUTOFF_MAX, FILTER_CUTOFF_MIN};
 
@@ -198,14 +197,14 @@ pub fn map_cutoff(normalized: f32) -> Message {
 
 /// Map normalized value (0.0-1.0) to filter resonance.
 ///
-/// Uses Power + Linear for controlled response at low end.
-/// Prevents harsh screeching from aliasing at low pot positions.
+/// Uses Linear curve for even control across full pot range.
+/// Fine-grained control in usable resonance territory (1.0-2.5).
 pub fn map_resonance(normalized: f32) -> Message {
     use crate::config::{FILTER_RESONANCE_MAX, FILTER_RESONANCE_MIN};
 
     let resonance = map_range(
         normalized,
-        Curve::Power,
+        Curve::Linear,
         Range::Linear {
             min: FILTER_RESONANCE_MIN,
             max: FILTER_RESONANCE_MAX,
@@ -217,7 +216,6 @@ pub fn map_resonance(normalized: f32) -> Message {
 /// Map normalized value (0.0-1.0) to LFO rate.
 ///
 /// Uses Linear + Geometric for equal decades per pot rotation.
-/// 0.01-10 Hz = 3 decades (0.01→0.1→1.0→10), musically useful range.
 pub fn map_lfo_rate(normalized: f32) -> Message {
     use crate::config::{LFO_FREQUENCY_MAX, LFO_FREQUENCY_MIN};
 
@@ -262,9 +260,9 @@ pub fn map_tempo(normalized: f32) -> Message {
     Message::SetTempo(bpm)
 }
 
-/// Map normalized value (0.0-1.0) to lead Euclidean hits (0-16).
+/// Map normalized value (0.0-1.0) to lead Euclidean hits.
 /// Value of 0 mutes the voice (rhythm advances silently to keep polyrhythms locked).
-/// Lead length is fixed at 16 steps.
+/// Lead length is fixed at LEAD_EUCLIDEAN_LENGTH.
 pub fn map_lead_euclidean_hits(normalized: f32) -> Message {
     use crate::config::LEAD_EUCLIDEAN_LENGTH;
 

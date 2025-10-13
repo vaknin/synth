@@ -78,14 +78,8 @@ pub const POLYBLEP_THRESHOLD_HZ: f32 = 1000.0;
 pub const POLYBLEP_THRESHOLD_PHASE_INC: f32 = POLYBLEP_THRESHOLD_HZ / SAMPLE_RATE as f32;
 
 /// Master output gain applied after voice mixing (0.0 to 1.0).
-/// Provides headroom even when all voices are at max volume (0.95 ≈ -0.45 dB).
+/// Provides headroom even when all voices are at max volume.
 pub const MASTER_GAIN: f32 = 0.90;
-
-/// Saturation drive amount (pre-gain before soft-clipping).
-/// Values > 1.0 push signals into compression zone for analog-style warmth.
-/// 1.0 = clean (no extra drive), 2.0-3.0 = fat bass, 4.0+ = aggressive distortion.
-/// Applied before soft_clip() to add harmonic richness and thickness.
-pub const SATURATION_DRIVE: f32 = 1.8;
 
 // === Wavetable ===
 
@@ -195,7 +189,7 @@ pub const FILTER_RESONANCE_MIN: f32 = 0.1;
 /// 4.0 enables classic Moog self-oscillation - the "sweet spot" before harsh distortion.
 /// At k≈4.0, loop gain reaches unity and filter whistles musically.
 /// Higher values overdrive the feedback path, losing the characteristic Moog tone.
-pub const FILTER_RESONANCE_MAX: f32 = 4.0;
+pub const FILTER_RESONANCE_MAX: f32 = 3.0;
 
 /// Denormal prevention threshold for filter state variables.
 /// Zeros out filter state when it decays below this value to prevent FPU slowdown.
@@ -207,19 +201,19 @@ pub const FILTER_DENORMAL_THRESHOLD: f32 = 1e-15;
 // === LFO (Low-Frequency Oscillator) ===
 
 /// Minimum LFO frequency (Hz).
-/// 0.01 Hz = 100 second cycle (ultra-slow pad evolution).
-pub const LFO_FREQUENCY_MIN: f32 = 0.01;
+/// 0.1 Hz = 10 second cycle (slow atmospheric evolution).
+pub const LFO_FREQUENCY_MIN: f32 = 0.1;
 
 /// Maximum LFO frequency (Hz).
-/// 10 Hz = 0.1 second cycle (rhythmic pulses, tremolo effects).
-pub const LFO_FREQUENCY_MAX: f32 = 10.0;
+/// 20 Hz = 0.05 second cycle (fast tremolo, rhythmic pulses).
+pub const LFO_FREQUENCY_MAX: f32 = 30.0;
 
 /// Default LFO frequency on initialization (Hz).
 /// 0.1 Hz = 10 second cycle (gentle evolution, safe default).
 pub const LFO_FREQUENCY_DEFAULT: f32 = 0.1;
 
 /// Default LFO depth on initialization (0.0-1.0).
-/// Zero depth = no modulation until pot message arrives.
+/// Zero depth = no modulation until pot message arrives (~20ms).
 pub const LFO_DEPTH_DEFAULT: f32 = 0.0;
 
 // === Generative Synthesis ===
@@ -301,7 +295,7 @@ pub const TURING_MUTATION_DEFAULT: f32 = 0.05;
 
 /// Bass voice mutation rate (fixed, no pot control).
 /// 2% = very stable drone, glacial evolution.
-pub const BASS_MUTATION_RATE: f32 = 0.05;
+pub const BASS_MUTATION_RATE: f32 = 0.25;
 
 /// Lead voice mutation rate (fixed, no pot control).
 /// 25% = melodic exploration, restless but musical.
@@ -311,7 +305,7 @@ pub const LEAD_MUTATION_RATE: f32 = 0.25;
 
 /// Bass voice harmonic anchoring interval (steps).
 /// Returns to root note every 8 steps for solid tonal foundation.
-pub const BASS_ANCHOR_INTERVAL: usize = 2;
+pub const BASS_ANCHOR_INTERVAL: usize = 8; // must be >= 1
 
 /// Lead voice harmonic anchoring interval (steps).
 /// Returns to root note every 16 steps for melodic resolution points.
@@ -393,7 +387,3 @@ pub const FILTER_ENVELOPE_DEPTH_MAX: f32 = 500.0;
 /// Filter envelope decay coefficient (exponential decay).
 /// 0.992 provides tempo-synced decay (~200ms at buffer rate ~172 Hz).
 pub const FILTER_ENVELOPE_DECAY_COEFF: f32 = 0.992;
-
-/// Turing-driven filter modulation range in Hz.
-/// Turing register state creates ±100 Hz slow wander around baseline cutoff.
-pub const FILTER_TURING_MODULATION_RANGE: f32 = 100.0;

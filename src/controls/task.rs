@@ -14,21 +14,21 @@ use embassy_time::{Duration, Timer};
 /// signal processing state (EMA filter, deadband) but shares the hardware.
 ///
 /// Current 8-pot setup (bass drone + lead generative):
-/// - Pot 1 (GPIO1): Filter Cutoff (main performance control, 200-15000 Hz)
-/// - Pot 2 (GPIO2): Filter Resonance (Moog character, 0.1-4.0)
-/// - Pot 3 (GPIO3): Filter Envelope Depth (rhythm-synced plucks, 0-500 Hz)
-/// - Pot 4 (GPIO4): Filter LFO Rate (sweep speed, 0.01-10 Hz)
-/// - Pot 5 (GPIO5): Filter LFO Depth (modulation amount, 0-100%)
-/// - Pot 6 (GPIO6): Envelope Attack (lead articulation, 1-200ms)
-/// - Pot 7 (GPIO7): Envelope Decay (lead sustain, 10-2000ms)
-/// - Pot 8 (GPIO8): Lead Euclidean Hits (rhythm density, 0-16)
+/// - Pot 1 (GPIO1): Filter Cutoff (main performance control)
+/// - Pot 2 (GPIO2): Filter Resonance (Moog character)
+/// - Pot 3 (GPIO3): Filter Envelope Depth (rhythm-synced plucks)
+/// - Pot 4 (GPIO4): Filter LFO Rate (sweep speed)
+/// - Pot 5 (GPIO5): Filter LFO Depth (modulation amount)
+/// - Pot 6 (GPIO6): Envelope Attack (lead articulation)
+/// - Pot 7 (GPIO7): Envelope Decay (lead sustain)
+/// - Pot 8 (GPIO8): Lead Euclidean Hits (rhythm density)
 ///
 /// Fixed generative parameters:
-/// - Bass: Continuous drone, 10-bit Turing, 2% mutation, ticks every 16 clocks
-/// - Lead: 16-step Euclidean, 20-bit Turing, 25% mutation, ticks every clock
-/// - Tempo: 120 BPM (hardcoded for now)
+/// - Bass: Continuous drone, see BASS_* constants in config.rs
+/// - Lead: Euclidean rhythm, see LEAD_* constants in config.rs
+/// - Tempo: CLOCK_BPM_DEFAULT (hardcoded for now)
 /// - Scale: Phrygian (dark, hypnotic, perfect for techno)
-/// - Portamento: Bass 0.997 (~100ms), Lead 0.995 (~50ms)
+/// - Portamento: See BASS_PORTAMENTO_COEFF and LEAD_PORTAMENTO_COEFF
 ///
 /// # Arguments
 /// * `sender` - Embassy channel sender for control messages

@@ -305,21 +305,15 @@ impl Oscillator {
         let level = self.level.value();
         let phase_inc = self.phase_increment.value();
         if level < OSC_SILENCE_THRESHOLD {
-            // Advance phase to stay in sync (cheap: just add + branch)
+            // Advance phase to stay in sync
             self.phase += phase_inc;
-            if self.phase >= 1.0 {
-                self.phase -= 1.0;
-            }
+            self.phase = self.phase.fract();
             return 0.0;
         }
 
-        // Advance phase (normalized [0.0, 1.0) range)
+        // Advance phase with modulo wrapping
         self.phase += phase_inc;
-
-        // Wrap phase to [0.0, 1.0) range
-        if self.phase >= 1.0 {
-            self.phase -= 1.0;
-        }
+        self.phase = self.phase.fract();
 
         // Generate waveform sample
         let sample = match self.waveform {

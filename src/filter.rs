@@ -11,6 +11,40 @@ use crate::config::{
 use crate::slew::Slew;
 use micromath::F32Ext;
 
+/// Fast soft-clipping saturation using rational function approximation.
+///
+/// Maps [-∞, ∞] → [-1, 1] smoothly, preserving signal character while preventing
+/// runaway oscillation. Eliminates harsh harmonics from hard clipping.
+///
+/// Cost: ~5-8 cycles (vs 2-3 for hard clamp, but musically superior)
+///
+/// # Examples
+/// ```
+/// soft_clip(0.5)   ≈ 0.33  // Gentle compression below ±1
+/// soft_clip(2.0)   ≈ 0.67  // Strong compression above ±1
+/// soft_clip(10.0)  ≈ 0.91  // Asymptotic approach to ±1
+/// ```
+#[inline]
+pub fn soft_clip(x: f32) -> f32 {
+    x / (1.0 + x.abs())
+}
+
+/// Calculate Moog filter feedback coefficient k from resonance and g_norm.
+///
+/// Huovilainen resonance compensation scaled for rational soft-clip saturation.
+/// Lower scaling (3.0 vs classic 4.0) prevents harsh harmonics with x/(1+|x|).
+///
+/// # Arguments
+/// * `resonance` - Resonance amount (0.1-4.0)
+/// * `g_norm` - Normalized filter coefficient g/(1+g)
+///
+/// # Returns
+/// Feedback gain k (always positive, typically 0.3-12.0)
+#[inline(always)]
+fn calculate_feedback_k(resonance: f32, g_norm: f32) -> f32 {
+    resonance * 3.0 * (1.0 - g_norm)
+}
+
 /// Moog Ladder Filter - 4-pole resonant lowpass.
 ///
 /// Improved Huovilainen topology with unconditional stability.
@@ -59,8 +93,8 @@ impl MoogLadderFilter {
         let g_norm = g / (1.0 + g);
         let g_inv = 1.0 - g_norm;
 
-        // Resonance compensation for stability (Huovilainen model)
-        let k = clamped_resonance * 4.0 * (1.0 - g_norm);
+        // Calculate feedback coefficient k (will be inlined)
+        let k = calculate_feedback_k(clamped_resonance, g_norm);
 
         Self {
             stage: [0.0; 4],
@@ -111,7 +145,7 @@ impl MoogLadderFilter {
 
     /// Update filter coefficients from direct parameters.
     ///
-    /// Call once per buffer before processing samples (BUFFER RATE ~172Hz).
+    /// Call once per buffer before processing samples (BUFFER RATE).
     /// Recalculates g and k from current cutoff/resonance values.
     /// Only recalculates when parameters changed (dirty flag optimization).
     ///
@@ -140,8 +174,8 @@ impl MoogLadderFilter {
         // Fast settling (α=0.95) keeps CPU overhead minimal
         self.g_norm_slew.set_target(g_norm);
 
-        // Resonance compensation: reduces feedback as cutoff increases for stability
-        let k = self.resonance * 4.0 * (1.0 - g_norm);
+        // Calculate feedback coefficient k (will be inlined)
+        let k = calculate_feedback_k(self.resonance, g_norm);
         self.k_slew.set_target(k);
 
         // Advance Slew state once at buffer rate (audio rate uses current() for zero-cost reads)
@@ -155,15 +189,15 @@ impl MoogLadderFilter {
         self.dirty = false;
     }
 
-    /// Process one sample through the filter (AUDIO RATE 44.1kHz - HOT PATH).
+    /// Process one sample through the filter (AUDIO RATE - HOT PATH).
     ///
-    /// OPTIMIZED: Coefficients smoothed at buffer rate (~172Hz), read at audio rate with zero-cost current().
-    /// This trades per-sample smoothing for ~10-20 cycle savings per sample (massive win).
-    /// ADC multisampling (9×) + fast Slew settling (α=0.95) should prevent zipper noise.
+    /// OPTIMIZED: Coefficients smoothed at buffer rate, read at audio rate with zero-cost current().
+    /// This trades per-sample smoothing for significant cycle savings per sample.
+    /// ADC multisampling + fast Slew settling should prevent zipper noise.
     ///
-    /// Denormal prevention: Zeros out filter state when it decays below 1e-15 (~-300dB).
-    /// Critical for ESP32-S3 - denormals cause 100× slowdown. Filter state reaches denormals
-    /// in 2-26ms of silence depending on cutoff frequency (faster at high cutoffs).
+    /// Denormal prevention: Zeros out filter state when it decays below threshold.
+    /// Critical for ESP32-S3 - denormals cause significant slowdown. Filter state reaches denormals
+    /// quickly during silence depending on cutoff frequency.
     ///
     /// # Arguments
     /// * `input` - Input sample (normalized ±1.0)
@@ -180,10 +214,10 @@ impl MoogLadderFilter {
         let g_inv = self.g_inv_cached; // Zero-cost cached read (computed once per buffer, not per sample)
         let k = self.k_slew.current();
 
-        // Feedback from output with hard clamp (prevents runaway oscillation)
-        // Simple clamp is fastest - no division, no extra multiplies
+        // Feedback from output with soft-clipping (smooth saturation prevents harsh harmonics)
+        // Rational approximation eliminates screeching at high resonance
         let fb = k * self.stage[3];
-        let feedback = fb.clamp(-1.0, 1.0);
+        let feedback = soft_clip(fb);
 
         // Process through 4 cascaded one-pole filters
         // Unrolled for performance (4 iterations, no loop overhead)
