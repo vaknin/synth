@@ -8,6 +8,10 @@ version      = "0.1.0"
 name = "synth"
 path = "./src/bin/main.rs"
 
+[features]
+# Enable CPU profiling stats (logs performance metrics every ~1 second)
+profile = []
+
 [dependencies]
 esp-bootloader-esp-idf = { version = "0.2.0", features = ["esp32s3"] }
 esp-hal = { version = "=1.0.0-rc.0", features = [
@@ -46,7 +50,6 @@ overflow-checks = false   # Remove runtime checks
 debug-assertions = false  # Remove debug overhead
 incremental = false       # Better with LTO
 panic = "abort"           # Standard for no_std/embedded
-# strip = "symbols"         # Remove symbol table (keeps debuginfo)
 
 [profile.release]
 codegen-units    = 1     # LLVM can perform better optimizations using a single thread

@@ -109,6 +109,8 @@ pub struct Potentiometer {
     /// EMA alpha coefficient (currently unused - testing single-stage smoothing)
     #[allow(dead_code)]
     alpha: f32,
+    /// Debug counter for occasional logging (every N sends)
+    debug_counter: u32,
 }
 
 impl Potentiometer {
@@ -123,6 +125,7 @@ impl Potentiometer {
             samples: [0u16; ADC_MULTISAMPLING_COUNT],
             filtered: (POT_MAX / 2) as f32,
             alpha: ADC_EMA_ALPHA,
+            debug_counter: 0,
         }
     }
 
@@ -168,6 +171,14 @@ impl Potentiometer {
         if (normalized - self.last_sent).abs() >= POT_CHANGE_THRESHOLD {
             self.last_sent = normalized;
             let msg = (self.map_fn)(normalized);
+
+            // DEBUG: Log occasionally to diagnose "short stubs" issue
+            self.debug_counter += 1;
+            if self.debug_counter >= 10000 {
+                log::info!("Pot: {:?} (norm: {:.3})", msg, normalized);
+                self.debug_counter = 0;
+            }
+
             if let Err(e) = sender.try_send(msg) {
                 warn!("Pot message dropped (queue full): {:?}", e);
             }
@@ -178,11 +189,12 @@ impl Potentiometer {
 // === Parameter Mapping Functions ===
 // Each function specifies its curve + range for clear, maintainable behavior.
 
-/// Map normalized value (0.0-1.0) to master pitch frequency.
+/// Map normalized value (0.0-1.0) to arpeggiator root pitch frequency.
 ///
 /// Uses Linear + Geometric: equal octaves per pot rotation (musically correct).
 /// 4-768 Hz = 7.58 octaves, each 10% pot travel = ~0.758 octaves.
-pub fn map_master_pitch(normalized: f32) -> Message {
+/// Note: Bass drone remains fixed at BASS_FIXED_FREQ (55 Hz), independent of this control.
+pub fn map_arp_pitch(normalized: f32) -> Message {
     let freq = map_range(
         normalized,
         Curve::Linear,
@@ -191,7 +203,7 @@ pub fn map_master_pitch(normalized: f32) -> Message {
             ratio: FREQUENCY_MAX / FREQUENCY_MIN, // 768/4 = 192 (const-folded)
         },
     );
-    Message::SetMasterPitch(freq)
+    Message::SetArpPitch(freq)
 }
 
 /// Map normalized value (0.0-1.0) to oscillator level.
@@ -288,17 +300,18 @@ pub fn map_lfo_depth(normalized: f32) -> Message {
 
 /// Map normalized value (0.0-1.0) to arpeggiator rate.
 ///
-/// Uses Linear + Linear for direct control of arp tempo.
-/// 1-20 Hz = 1-20 notes/second, musically useful range for arpeggios.
+/// Uses Power + Geometric for perceptually even pacing across 2 decades.
+/// 0.1-8 Hz = 1 note per 10 seconds → 8 notes per second.
+/// Power curve emphasizes slow rates (more control at low end for ambient/generative).
 pub fn map_arp_rate(normalized: f32) -> Message {
     use crate::config::{ARP_RATE_MAX, ARP_RATE_MIN};
 
     let rate = map_range(
         normalized,
-        Curve::Linear,
-        Range::Linear {
+        Curve::Power,
+        Range::Geometric {
             min: ARP_RATE_MIN,
-            max: ARP_RATE_MAX,
+            ratio: ARP_RATE_MAX / ARP_RATE_MIN, // 8/0.1 = 80 (const-folded)
         },
     );
     Message::SetArpRate(rate)
@@ -329,4 +342,42 @@ pub fn map_arp_mode(normalized: f32) -> Message {
 pub fn map_arp_transpose(normalized: f32) -> Message {
     let semitones = map_range(normalized, Curve::Quadratic, Range::Bipolar { range: 12.0 });
     Message::SetArpTranspose(semitones.round() as i8)
+}
+
+/// Map normalized value (0.0-1.0) to envelope attack time.
+///
+/// Uses Power + Linear for perceptual uniformity - longer times more usable at high end.
+/// 1-200ms range: pot min = instant (percussive), pot max = soft (pad-like).
+/// Per CLAUDE.md: ~50ms portamento for smooth pitch transitions.
+pub fn map_envelope_attack(normalized: f32) -> Message {
+    use crate::config::{ENVELOPE_ATTACK_POT_MAX_MS, ENVELOPE_ATTACK_POT_MIN_MS};
+
+    let attack_ms = map_range(
+        normalized,
+        Curve::Power,
+        Range::Linear {
+            min: ENVELOPE_ATTACK_POT_MIN_MS,
+            max: ENVELOPE_ATTACK_POT_MAX_MS,
+        },
+    );
+    Message::SetEnvelopeAttack(attack_ms)
+}
+
+/// Map normalized value (0.0-1.0) to envelope decay time.
+///
+/// Uses Power + Linear for perceptual uniformity - emphasizes shorter, musical decays.
+/// 50-2000ms range: pot min = tight staccato, pot max = long sustain.
+/// Per CLAUDE.md: "Generative melodies need long decays (300-800ms)"
+pub fn map_envelope_decay(normalized: f32) -> Message {
+    use crate::config::{ENVELOPE_DECAY_POT_MAX_MS, ENVELOPE_DECAY_POT_MIN_MS};
+
+    let decay_ms = map_range(
+        normalized,
+        Curve::Power,
+        Range::Linear {
+            min: ENVELOPE_DECAY_POT_MIN_MS,
+            max: ENVELOPE_DECAY_POT_MAX_MS,
+        },
+    );
+    Message::SetEnvelopeDecay(decay_ms)
 }

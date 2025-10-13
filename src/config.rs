@@ -17,6 +17,9 @@ pub const VOICE_COUNT: usize = 3;
 /// 44.1 kHz keeps compatibility with consumer audio equipment.
 pub const SAMPLE_RATE: u32 = 44_100;
 
+/// Sample rate as f32 (cached for hot paths to avoid repeated casts).
+pub const SAMPLE_RATE_F32: f32 = SAMPLE_RATE as f32;
+
 /// Buffer callback rate in Hz (DMA interrupt frequency).
 /// Each stereo frame = 4 bytes (2 channels × 2 bytes per i16 sample).
 /// Calculated as: SAMPLE_RATE / (DMA_BUFFER_SIZE / 4)
@@ -172,8 +175,8 @@ pub const FILTER_RESONANCE_MIN: f32 = 0.1;
 /// Maximum filter resonance (dimensionless Q factor).
 /// 4.0 enables classic Moog self-oscillation - the "sweet spot" before harsh distortion.
 /// At k≈4.0, loop gain reaches unity and filter whistles musically.
-/// Higher values overdrive the feedback path, losing the characteristic Moog tone.
-pub const FILTER_RESONANCE_MAX: f32 = 2.0;
+/// Per CLAUDE.md: "Generative melodies need strong resonance (3.5-4.0)"
+pub const FILTER_RESONANCE_MAX: f32 = 4.0;
 
 // === LFO (Low-Frequency Oscillator) ===
 
@@ -196,17 +199,66 @@ pub const LFO_DEPTH_DEFAULT: f32 = 0.0;
 // === Arpeggiator ===
 
 /// Minimum arpeggiator clock rate (Hz).
-/// 1 Hz = 1 note per second (slow, spacious arpeggios).
-pub const ARP_RATE_MIN: f32 = 1.0;
+/// 0.1 Hz = 1 note every 10 seconds (glacial, ambient pacing).
+pub const ARP_RATE_MIN: f32 = 0.1;
 
 /// Maximum arpeggiator clock rate (Hz).
-/// 20 Hz = 20 notes per second (fast, rhythmic patterns).
-pub const ARP_RATE_MAX: f32 = 20.0;
+/// 8 Hz = 8 notes per second (rhythmic, sequenced patterns).
+pub const ARP_RATE_MAX: f32 = 8.0;
 
 /// Default arpeggiator clock rate (Hz).
-/// 4 Hz = 4 notes per second (moderate melodic pace, good starting point).
-pub const ARP_RATE_DEFAULT: f32 = 4.0;
+/// 2 Hz = 2 notes per second (relaxed generative pace).
+pub const ARP_RATE_DEFAULT: f32 = 2.0;
 
 /// Arpeggiator gate length (0.0-1.0).
 /// 0.8 = 80% note length, 20% silence for articulation (classic arp feel).
 pub const ARP_GATE_LENGTH: f32 = 0.8;
+
+/// Scale change interval (notes).
+/// After playing this many notes AND completing a pattern cycle, switch to a random scale.
+/// 16 notes = ~4-8 seconds at typical arp rates (2-4 Hz), nice balance of familiarity and variety.
+pub const ARP_SCALE_CHANGE_INTERVAL: usize = 16;
+
+// === Envelope (Attack-Decay) ===
+
+/// Fixed envelope attack time in milliseconds.
+/// 10ms provides snappy, responsive note starts without clicks.
+pub const ENVELOPE_ATTACK_MS: f32 = 10.0;
+
+/// Default envelope decay time in milliseconds.
+/// 500ms provides long, overlapping notes for generative melodies.
+/// Per CLAUDE.md: "Generative melodies need long decays (300-800ms)"
+pub const ENVELOPE_DEFAULT_DECAY_MS: f32 = 500.0;
+
+/// Pot-controllable envelope attack range: minimum (instant, percussive).
+pub const ENVELOPE_ATTACK_POT_MIN_MS: f32 = 1.0;
+
+/// Pot-controllable envelope attack range: maximum (soft, pad-like).
+/// Per CLAUDE.md: ~50ms portamento for smooth transitions
+pub const ENVELOPE_ATTACK_POT_MAX_MS: f32 = 200.0;
+
+/// Pot-controllable envelope decay range: minimum (tight, staccato).
+pub const ENVELOPE_DECAY_POT_MIN_MS: f32 = 50.0;
+
+/// Pot-controllable envelope decay range: maximum (long sustain for melodies).
+/// Per CLAUDE.md: "Generative melodies need long decays (300-800ms)"
+pub const ENVELOPE_DECAY_POT_MAX_MS: f32 = 2000.0;
+
+// === Bass Texture Layer ===
+
+/// Bass drift LFO rate (Hz).
+/// 0.033 Hz = 30 second cycle (ultra-slow Lyra-8 style drift).
+pub const BASS_DRIFT_LFO_RATE: f32 = 0.033;
+
+/// Bass drift depth in cents (±5 cents).
+/// Subtle pitch variation that adds life without detuning noticeably.
+pub const BASS_DRIFT_CENTS: f32 = 5.0;
+
+/// Bass output level (0.0-1.0).
+/// 0.25 = 25% volume, keeps bass as texture underneath lead.
+pub const BASS_LEVEL: f32 = 1.0;
+
+/// Bass fixed frequency (Hz).
+/// 55 Hz = A1 (low rumble, sub-bass territory).
+/// Remains constant while arp melody moves above it.
+pub const BASS_FIXED_FREQ: f32 = 75.0;

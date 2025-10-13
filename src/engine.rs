@@ -2,6 +2,7 @@
 
 use crate::arpeggiator::Arpeggiator;
 use crate::config::MASTER_GAIN;
+use crate::envelope::ADEnvelope;
 use crate::filter::MoogLadderFilter;
 use crate::lfo::LFO;
 use crate::message::Message;
@@ -11,7 +12,7 @@ use crate::{AudioStream, ChannelReceiver, I16_MAX_F32};
 
 /// Main synth engine managing direct oscillators (monophonic architecture).
 pub struct Engine {
-    /// Array of 2 oscillators [Lead(Saw), Bass(Square)]
+    /// Array of 2 oscillators [Lead(Saw), Bass(Sine)]
     oscillators: [Oscillator; 2],
 
     /// Cached reciprocal of level sum for fast normalization (multiply instead of divide)
@@ -40,6 +41,15 @@ pub struct Engine {
     /// Arpeggiator (clock-driven melody generation)
     arpeggiator: Arpeggiator,
 
+    /// Bass drift LFO (Lyra-8 style slow pitch modulation)
+    bass_drift_lfo: LFO,
+
+    /// Lead oscillator envelope (Attack-Decay for note articulation)
+    lead_envelope: ADEnvelope,
+
+    /// Previous arp gate state (for detecting note triggers)
+    prev_gate_active: bool,
+
     /// Profiling: accumulated statistics (only compiled with 'profile' feature)
     #[cfg(feature = "profile")]
     profile_stats: ProfileStats,
@@ -63,13 +73,17 @@ impl Engine {
     /// Engine with oscillators at FREQUENCY_MIN, all silent (level=0.0).
     /// Pot messages arrive within ~20ms and Slew smooths to actual positions.
     pub fn new(receiver: ChannelReceiver) -> Self {
+        let mut oscillators = [
+            Oscillator::new(Waveform::Saw),  // Lead (arp-controlled)
+            Oscillator::new(Waveform::Sine), // Bass (fixed drone)
+        ];
+
+        // Bass: Set fixed frequency and level once, never change them
+        oscillators[1].set_frequency(crate::config::BASS_FIXED_FREQ);
+        oscillators[1].set_level(crate::config::BASS_LEVEL);
+
         Self {
-            // Array of 2 oscillators: Lead (Saw), Bass (Square)
-            // Frequencies controlled by arpeggiator
-            oscillators: [
-                Oscillator::new(Waveform::Saw),     // Lead
-                Oscillator::new(Waveform::Square),  // Bass
-            ],
+            oscillators,
             // Normalization factor: starts at 1.0 (neutral), smoothed at audio rate to prevent zipper
             level_sum_reciprocal: Slew::new(1.0),
             consumer: receiver,
@@ -90,6 +104,12 @@ impl Engine {
             base_cutoff: crate::config::FILTER_CUTOFF_MIN,
             lfo_cutoff_range: 0.0,
             arpeggiator: Arpeggiator::new(),
+            bass_drift_lfo: LFO::new(
+                crate::config::BASS_DRIFT_LFO_RATE,
+                1.0, // Full depth - we'll scale by BASS_DRIFT_CENTS in modulation
+            ),
+            lead_envelope: ADEnvelope::new(),
+            prev_gate_active: false,
             #[cfg(feature = "profile")]
             profile_stats: ProfileStats {
                 buffer_count: 0,
@@ -100,11 +120,12 @@ impl Engine {
         }
     }
 
-    /// Set master pitch (arpeggiator root frequency).
+    /// Set arpeggiator root pitch (lead melody frequency).
+    /// Bass drone remains independent at fixed frequency.
     ///
     /// # Arguments
     /// * `frequency` - Root frequency in Hz (arpeggiator transposes from this)
-    fn set_master_pitch(&mut self, frequency: f32) {
+    fn set_arp_pitch(&mut self, frequency: f32) {
         self.arpeggiator.set_root_freq(frequency);
     }
 
@@ -121,8 +142,8 @@ impl Engine {
     fn consume_messages(&mut self) {
         while let Ok(msg) = self.consumer.try_receive() {
             match msg {
-                Message::SetMasterPitch(freq) => {
-                    self.set_master_pitch(freq);
+                Message::SetArpPitch(freq) => {
+                    self.set_arp_pitch(freq);
                 }
 
                 Message::SetOscLevel(osc_id, level) => {
@@ -190,6 +211,14 @@ impl Engine {
                     // Future: Switch between hardcoded chord patterns
                     // For now, only C major is implemented
                 }
+
+                Message::SetEnvelopeAttack(attack_ms) => {
+                    self.lead_envelope.set_attack_ms(attack_ms);
+                }
+
+                Message::SetEnvelopeDecay(decay_ms) => {
+                    self.lead_envelope.set_decay_ms(decay_ms);
+                }
             }
         }
     }
@@ -200,20 +229,24 @@ impl Engine {
     /// that don't need audio-rate smoothing. LFO modulation applied here.
     #[inline]
     fn update_buffer_parameters(&mut self) {
-        // Arpeggiator: tick at buffer rate, route to Lead and Bass oscillators
+        // Arpeggiator: tick at buffer rate, route to Lead oscillator
         let arp_note = self.arpeggiator.tick();
 
-        // Lead oscillator: always set frequency, gate controls level
-        self.oscillators[0].set_frequency(arp_note.lead_freq);
-        self.oscillators[0].set_level(if arp_note.gate_active { 1.0 } else { 0.0 });
-
-        // Bass oscillator: only when bass_active, gate controls level
-        if arp_note.bass_active {
-            self.oscillators[1].set_frequency(self.arpeggiator.bass_freq);
-            self.oscillators[1].set_level(if arp_note.gate_active { 1.0 } else { 0.0 });
-        } else {
-            self.oscillators[1].set_level(0.0); // Silent when not bass beat
+        // Detect note trigger (rising edge of gate: false → true)
+        if arp_note.gate_active && !self.prev_gate_active {
+            self.lead_envelope.trigger();
         }
+        self.prev_gate_active = arp_note.gate_active;
+
+        // Lead oscillator: frequency from arpeggiator, level always 1.0 (envelope handles amplitude)
+        self.oscillators[0].set_frequency(arp_note.lead_freq);
+        self.oscillators[0].set_level(1.0);
+
+        // Bass oscillator: fixed 55 Hz drone with slow pitch drift (Lyra-8 style)
+        // Frequency and level set once in new(), only detune changes here
+        let drift_lfo_value = self.bass_drift_lfo.tick();
+        let drift_cents = drift_lfo_value * crate::config::BASS_DRIFT_CENTS;
+        self.oscillators[1].set_detune_cents(drift_cents);
 
         // Oscillator parameters: No-op (level/pitch smoothed at audio rate for responsiveness)
         for osc in &mut self.oscillators {
@@ -240,8 +273,17 @@ impl Engine {
     /// Filtered mono sample (before master gain and soft-start)
     #[inline]
     fn render_sample(&mut self) -> f32 {
-        // Sum all oscillators (tick() smooths both pitch & level at audio rate)
-        let mix: f32 = self.oscillators.iter_mut().map(|osc| osc.tick()).sum();
+        // Tick lead envelope (audio rate)
+        let envelope_level = self.lead_envelope.tick();
+
+        // Render lead oscillator with envelope applied
+        let lead_out = self.oscillators[0].tick() * envelope_level;
+
+        // Render bass oscillator (no envelope, constant texture)
+        let bass_out = self.oscillators[1].tick();
+
+        // Mix oscillators
+        let mix = lead_out + bass_out;
 
         // Normalize by sum of oscillator levels (smoothed at audio rate, cheap when settled)
         let normalized = mix * self.level_sum_reciprocal.value();
@@ -250,7 +292,6 @@ impl Engine {
         let filtered = self.filter.process(normalized);
 
         filtered
-        // normalized
     }
 
     /// Render audio samples into the DMA buffer.

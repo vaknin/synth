@@ -29,8 +29,9 @@ pub enum ArpMode {
 /// Messages sent from control tasks (buttons, pots, encoders) to audio task.
 #[derive(Debug, Clone, Copy)]
 pub enum Message {
-    /// Set master pitch for all oscillators (30Hz-1024Hz, exponential mapping)
-    SetMasterPitch(f32),
+    /// Set arpeggiator root pitch (4Hz-768Hz, exponential mapping)
+    /// Bass drone remains fixed, independent of this control.
+    SetArpPitch(f32),
 
     /// Set level for specific oscillator (0.0-1.0)
     SetOscLevel(OscillatorId, f32),
@@ -62,4 +63,10 @@ pub enum Message {
 
     /// Set arpeggiator chord pattern (0-7, for future expansion)
     SetArpChord(usize),
+
+    /// Set envelope attack time in milliseconds (1-200ms)
+    SetEnvelopeAttack(f32),
+
+    /// Set envelope decay time in milliseconds (50-2000ms)
+    SetEnvelopeDecay(f32),
 }

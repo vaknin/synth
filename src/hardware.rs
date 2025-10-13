@@ -22,9 +22,9 @@ pub type Adc1 = Adc<'static, ADC1<'static>, Blocking>;
 // I2S peripheral type aliases (for audio setup)
 type I2s0Peripheral = esp_hal::peripherals::I2S0<'static>;
 type DmaChannel0 = esp_hal::peripherals::DMA_CH0<'static>;
-type Gpio16 = esp_hal::peripherals::GPIO16<'static>;
-type Gpio17 = esp_hal::peripherals::GPIO17<'static>;
-type Gpio18 = esp_hal::peripherals::GPIO18<'static>;
+type Gpio35 = esp_hal::peripherals::GPIO35<'static>;
+type Gpio36 = esp_hal::peripherals::GPIO36<'static>;
+type Gpio37 = esp_hal::peripherals::GPIO37<'static>;
 
 // GPIO type aliases for ADC pins (8 pots)
 type GPIO1 = peripherals::GPIO1<'static>;
@@ -54,18 +54,18 @@ adc_pins! {
 /// sets up circular DMA transfer, and returns transaction ready for push_with().
 ///
 /// # Pin Configuration (Non-ADC GPIOs)
-/// - BCK (bit clock) => GPIO16
-/// - LRCK (word select) => GPIO17
-/// - DATA (data out) => GPIO18
+/// - BCK (bit clock) => GPIO37
+/// - DIN (data out) => GPIO36
+/// - LCK (word select) => GPIO35
 ///
-/// GPIO 16/17/18 have no ADC capability and don't conflict with I2C/SPI peripherals.
+/// GPIO 35/36/37 are digital I/O pins with no ADC, suitable for high-speed I2S.
 ///
 /// # Arguments
 /// * `i2s0` - I2S0 peripheral
 /// * `dma_channel` - DMA channel for circular buffer
-/// * `gpio16` - BCLK pin
-/// * `gpio17` - WS pin
-/// * `gpio18` - DOUT pin
+/// * `gpio35` - LCK (word select) pin
+/// * `gpio36` - DIN (data out) pin
+/// * `gpio37` - BCK (bit clock) pin
 /// * `tx_buffer` - DMA transmit buffer (from dma_circular_buffers! macro)
 /// * `tx_descriptors` - DMA descriptors (from dma_circular_buffers! macro)
 ///
@@ -74,9 +74,9 @@ adc_pins! {
 pub fn setup_audio(
     i2s0: I2s0Peripheral,
     dma_channel: DmaChannel0,
-    gpio16: Gpio16,
-    gpio17: Gpio17,
-    gpio18: Gpio18,
+    gpio35: Gpio35,
+    gpio36: Gpio36,
+    gpio37: Gpio37,
     tx_buffer: &'static mut [u8],
     tx_descriptors: &'static mut [DmaDescriptor],
 ) -> AudioStream {
@@ -89,9 +89,9 @@ pub fn setup_audio(
     )
     .into_async()
     .i2s_tx
-    .with_bclk(gpio16)
-    .with_ws(gpio17)
-    .with_dout(gpio18)
+    .with_bclk(gpio37)
+    .with_ws(gpio35)
+    .with_dout(gpio36)
     .build(tx_descriptors);
 
     i2s_tx.write_dma_circular_async(tx_buffer).unwrap()

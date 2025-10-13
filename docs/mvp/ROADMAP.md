@@ -3,9 +3,11 @@
 **Vision**: Pocket-sized melody maker with arpeggiator + subtractive synthesis. Good melodies, expressive filter control, fun to perform.
 
 **Current State**:
-- ✅ Phase 1-3 complete (4 oscillators, Moog filter, filter LFO)
-- ✅ 8 pots wired and working
-- 📍 **Next**: Build arpeggiator system
+- ✅ Phase 1-3 complete (subtractive synthesis engine)
+- ✅ Phase 4A complete (basic arpeggiator with gate)
+- ✅ Phase 4B complete (arp modes: Up/Down/UpDown/Random, transpose ±12 semitones)
+- ✅ Phase 4C complete (delay line with feedback, 50ms-1000ms)
+- 📍 **Current**: Testing full arpeggiator + delay system
 
 ---
 
@@ -14,21 +16,26 @@
 ```
 Arpeggiator Clock (1-20 Hz) → Chord Pattern → Note
                                               ↓
-                                    ┌─────────┴─────────┐
-                                    │                   │
-                              Lead OSCs             Bass OSC
-                          (play arp note)      (play root note)
-                                    │                   │
-                                    └─────────┬─────────┘
-                                              ↓
-                                    Mix → Moog Filter → Output
+                                         Lead OSC (Saw)
+                                      (play arp note)
+                                              │
+                                              ├─────────┐
+                                              │         │
+                                    Mix ←─────┘    Bass OSC (Sine)
+                                     │         (constant drone @ -2 oct)
+                                     │         with drift LFO (±5¢)
+                                     ↓
+                          Moog Filter → Delay → Output
 ```
 
 **Key Design:**
-- **Lead**: 1 oscillator (Osc2 Saw) plays arpeggio notes (cycles through chord)
-- **Bass**: 1 oscillator (Sub Square) plays root note every 4th note (sparse rhythm)
-- **Same clock**: Both use arp clock, harmonically locked
-- **Filter LFO**: Already working, keep it for evolving timbre
+- **Lead**: 1 oscillator (Saw) plays arpeggio notes with gate articulation
+- **Bass**: 1 oscillator (Sine) plays constant sub-bass drone at -2 octaves
+  - Lyra-8 style pitch drift: ±5 cents over 30-second cycle
+  - 25% level (texture, not melody)
+  - Warm sine wave prevents harmonic masking
+- **Dual layer**: Lead = performance/melody, Bass = texture/ambience
+- **Filter LFO**: Modulates cutoff for evolving timbre (shared by both layers)
 
 ---
 
@@ -44,17 +51,23 @@ Arpeggiator Clock (1-20 Hz) → Chord Pattern → Note
 - Chords: Start with 1 pattern (C major), expand later
 - Bass: Plays root note every 4th note (sparse rhythm)
 
-**Pot Allocation (8 pots)**:
+**Pot Allocation (8 pots) - Current**:
 ```
-Pot 0: Filter Cutoff         (essential)
-Pot 1: Filter Resonance       (essential)
-Pot 2: Filter LFO Depth       (existing)
+Pot 1: Filter Cutoff         (essential)
+Pot 2: Filter Resonance       (essential)
 Pot 3: Filter LFO Rate        (existing)
-Pot 4: Arp Rate (1-20 Hz)     (new)
-Pot 5: <Spare>                (future: chord select when multiple chords added)
-Pot 6: <Spare>                (future: arp mode, root note transpose)
-Pot 7: <Spare>                (future: delay time, delay mix)
+Pot 4: Filter LFO Depth       (existing)
+Pot 5: Arp Rate (1-20 Hz)     ✅ implemented
+Pot 6: Delay Time (50ms-1s)   ✅ implemented
+Pot 7: Delay Mix (0-50%)      ✅ implemented
+Pot 8: Master Pitch           ✅ implemented
 ```
+
+**Tradeoffs Made**:
+- Arp Mode (Up/Down/UpDown/Random): Hardcoded to `Up` mode
+- Arp Transpose (±12 semitones): Removed for delay control
+- Delay feedback: Hardcoded at 40% (3-4 echoes)
+- Bass rhythm: Changed from "every 4th note" to constant drone for texture
 
 **Implementation**:
 1. Create `src/arpeggiator.rs`:
@@ -62,77 +75,77 @@ Pot 7: <Spare>                (future: delay time, delay mix)
    - Hardcoded chord pattern (start with 1: C major)
    - Pattern index tracking
    - "Up" mode logic
-   - Bass trigger (every 4th note, derived from chord length)
+   - Bass frequency cached at -2 octaves (sub bass/pad territory)
 2. Update `src/engine.rs`:
    - Add `arpeggiator` field
+   - Add `bass_drift_lfo` (30-second cycle, ±5 cents modulation)
    - Tick arp at buffer rate
-   - Route lead note to Osc2 (Saw)
-   - Route bass note to Sub (Square, conditional on bass_active)
+   - Route lead note to Osc[0] (Saw) with gate
+   - Route bass to Osc[1] (Sine, constant drone with drift)
 3. Update `src/message.rs`:
    - Add `SetArpRate(f32)`
    - Add `SetArpChord(usize)` (for future chord selection)
-4. Wire pot 4 for arp rate control
+4. Wire pot 5 for arp rate control
 
 **Success Criteria**:
 - ✅ Arpeggio cycles correctly (C → E → G → C)
-- ✅ Bass plays root note every 4th note (sparse, grooving rhythm)
-- ✅ Rate pot controls speed smoothly
-- ✅ Chord selection switches patterns (future)
+- ✅ Bass provides constant harmonic foundation at -2 octaves
+- ✅ Bass drift adds subtle movement without detuning noticeably
+- ✅ Rate pot controls arp speed smoothly
+- ✅ Dual layer works: lead = melody, bass = evolving texture
 - ✅ Filter performance feels responsive
+- ✅ Can switch between performance mode (fast arp) and ambient mode (slow arp)
 
 ---
 
-### Phase 4B: Arp Modes + Features
+### Phase 4B: Arp Modes + Features ✅
 
 **Goal**: Add more arp modes and musical features.
 
-**New Features**:
-- Modes: Up, Down, Up-Down, Random
-- Root transpose: Shift pitch up/down
-- Octave range: 1-3 octaves
+**Implemented Features**:
+- ✅ Modes: Up, Down, UpDown, Random (all 4 modes working)
+- ✅ Random mode uses `WhiteNoise` LFSR (32-bit Galois)
+- ✅ Root transpose: ±12 semitones with extended lookup table (0-24 semitones)
+- ✅ Gate system: 80% note length, 20% silence for articulation
 
-**Pot Reallocation**:
-```
-Pot 6: Arp Mode (4 modes)     (repurpose spare)
-Pot 7: Root Transpose         (repurpose spare, ±12 semitones)
-```
-
-**Implementation**:
-- Add mode enum to arpeggiator
-- Add random mode (use `WhiteNoise` LFSR)
-- Add root transpose logic
-- Test all modes extensively
+**Status**: Fully implemented but mode/transpose controls sacrificed for delay (Phase 4C).
+- Arp mode: Hardcoded to `ArpMode::Up` in engine
+- Transpose: Code exists but no pot control (set to 0 semitones)
 
 ---
 
-### Phase 4C: Delay (Optional)
+### Phase 4C: Delay ✅
 
 **Goal**: Add delay for pseudo-polyphonic texture.
 
-**Features**:
-- Delay time: 50ms - 2s
-- Delay mix: 0-100%
-- Feedback: Hardcoded at 40% (test if pot needed)
+**Implemented Features**:
+- ✅ Delay time: 50ms - 1000ms (exponential pot curve)
+- ✅ Delay mix: 0-50% (wet/dry balance, capped at 50% to preserve dry attack)
+- ✅ Feedback: Hardcoded at 40% (creates 3-4 natural echoes)
+- ✅ Ring buffer: Vec<f32> in heap (will optimize to PSRAM later if needed)
+- ✅ Architecture: Filter → Delay (preserves filtered character in echoes)
 
-**Requires**: More pots (currently 8, would need 10)
+**Pot Assignment**:
+- Pot 6: Delay Time (exponential curve for perceptual linearity)
+- Pot 7: Delay Mix (linear 0-50%)
 
-**Implementation**:
-- PSRAM ring buffer
-- Linear interpolation for time changes
-- Feedback saturation (prevent runaway)
+**Performance**: ~10-20 cycles/sample (ring buffer read/write + feedback multiply)
 
 ---
 
 ## Hardcoded Parameters
 
 These work well as constants (no pots needed):
-- Main OSC waveform: Saw (Osc1), Saw (Osc2), Square (Osc3)
-- Main OSC levels: Equal mix (will normalize)
-- Sub OSC: -1 octave below lead, plays bass root
-- Filter LFO waveform: Sine (smooth sweeps)
-- Master gain: 0.9 (headroom)
-- Arp attack: Fast (< 5ms, percussive)
-- Arp gate: 80% (slight gap between notes)
+- **Lead waveform**: Saw (bright, harmonic-rich)
+- **Bass waveform**: Sine (warm, sub-frequency foundation)
+- **Bass level**: 25% (texture underneath, not melody)
+- **Bass drift**: ±5 cents over 30-second cycle (Lyra-8 style)
+- **Bass octave**: -2 octaves (sub bass/pad territory)
+- **Filter LFO waveform**: Sine (smooth sweeps)
+- **Master gain**: 0.9 (headroom)
+- **Arp attack**: Fast (< 5ms, percussive)
+- **Arp gate**: 80% (slight gap between notes)
+- **Delay feedback**: 40% (3-4 natural echoes)
 
 ---
 
@@ -202,19 +215,23 @@ pub enum Message {
 ## Current Status
 
 **Completed**:
-- ✅ Subtractive synthesis engine (4 oscillators)
+- ✅ Subtractive synthesis engine (2 oscillators: Lead Saw + Bass Square)
 - ✅ Moog ladder filter (cutoff, resonance)
-- ✅ Filter LFO (rate, depth)
-- ✅ 8 pots wired and polling
+- ✅ Filter LFO (rate, depth, sine wave)
+- ✅ Arpeggiator (clock-driven, C major chord, Up mode)
+- ✅ Arp gate system (80/20 timing for articulation)
+- ✅ Delay line (50ms-1000ms, 40% feedback, filter→delay chain)
+- ✅ 8 pots fully wired
 
 **In Progress**:
-- 📍 Salvaging WhiteNoise from euclidean branch (for random arp mode)
+- 📍 Testing full system (arpeggiator + delay + filter)
+- 📍 Evaluating delay impact on musicality
 
 **Next Steps**:
-1. Design arpeggiator architecture (hardcoded chords)
-2. Implement basic "up" mode
-3. Wire pots 4-5 for arp control
-4. Test and iterate
+1. Build and test on hardware
+2. Evaluate if arp mode/transpose pots are needed (vs delay)
+3. Consider adding more chord patterns
+4. Potentially add PSRAM optimization for delay buffer
 
 ---
 

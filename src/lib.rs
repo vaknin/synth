@@ -13,6 +13,7 @@ pub mod arpeggiator;
 pub mod config;
 pub mod controls;
 pub mod engine;
+pub mod envelope;
 pub mod filter;
 pub mod hardware;
 pub mod lfo;

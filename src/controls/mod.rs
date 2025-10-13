@@ -9,8 +9,9 @@ pub mod task;
 
 // Re-export commonly used items
 pub use pot::{
-    map_arp_mode, map_arp_rate, map_arp_transpose, map_cutoff, map_lfo_depth, map_lfo_rate,
-    map_master_pitch, map_osc_detune, map_osc_level, map_resonance, Potentiometer,
+    map_arp_mode, map_arp_pitch, map_arp_rate, map_arp_transpose, map_cutoff,
+    map_envelope_attack, map_envelope_decay, map_lfo_depth, map_lfo_rate, map_osc_detune,
+    map_osc_level, map_resonance, Potentiometer,
 };
 pub use task::pot_task;
 

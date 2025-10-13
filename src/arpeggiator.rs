@@ -1,13 +1,52 @@
 //! Arpeggiator module: clock-driven melody generation with hardcoded chord patterns.
 
-use crate::config::{ARP_GATE_LENGTH, ARP_RATE_DEFAULT, BUFFER_RATE};
+use crate::config::{ARP_GATE_LENGTH, ARP_RATE_DEFAULT, ARP_SCALE_CHANGE_INTERVAL, BUFFER_RATE};
 use crate::message::ArpMode;
 use crate::noise::WhiteNoise;
 
-/// Chord pattern: C major [root, maj3rd, 5th, octave] in semitone offsets.
-/// Used with "up" mode to cycle through notes: C → E → G → C...
-/// Bass triggers when pattern wraps (note_index == 0), creating sparse rhythm.
+// === Chord Patterns: Classic Arpeggio Building Blocks ===
+//
+// Short 4-5 note patterns that cycle like traditional arpeggios (C→E→G→C).
+// Randomly switch between chord types every N notes for generative variety.
+
+/// Minor triad: [root, m3, 5th, octave]
+/// Classic sad/moody sound. Foundation of minor key music.
+const CHORD_MINOR: [i8; 4] = [0, 3, 7, 12];
+
+/// Major triad: [root, M3, 5th, octave]
+/// Bright, happy, resolved. Most common chord in Western music.
 const CHORD_MAJOR: [i8; 4] = [0, 4, 7, 12];
+
+/// Minor 7th: [root, m3, 5th, m7, octave]
+/// Jazzy, sophisticated minor sound. Adds color without dissonance.
+const CHORD_MINOR_7: [i8; 5] = [0, 3, 7, 10, 12];
+
+/// Dominant 7th: [root, M3, 5th, m7, octave]
+/// Tension and resolution. Blues/jazz staple.
+const CHORD_DOM_7: [i8; 5] = [0, 4, 7, 10, 12];
+
+/// Sus4: [root, 4th, 5th, octave]
+/// Ambiguous, floating, neither major nor minor. Very generative.
+const CHORD_SUS4: [i8; 4] = [0, 5, 7, 12];
+
+/// Augmented triad: [root, M3, #5, octave]
+/// Symmetrical, dreamy, unresolved. Whole-tone flavor.
+const CHORD_AUG: [i8; 4] = [0, 4, 8, 12];
+
+/// Diminished 7th: [root, m3, dim5, dim7, octave]
+/// Tense, dramatic, symmetrical. Horror movie vibes.
+const CHORD_DIM7: [i8; 5] = [0, 3, 6, 9, 12];
+
+/// All available chords for random selection.
+const ALL_CHORDS: &[&[i8]] = &[
+    &CHORD_MINOR,
+    &CHORD_MAJOR,
+    &CHORD_MINOR_7,
+    &CHORD_DOM_7,
+    &CHORD_SUS4,
+    &CHORD_AUG,
+    &CHORD_DIM7,
+];
 
 /// Semitone-to-frequency ratio lookup table.
 /// Indexed by semitone offset (0-24), returns frequency multiplier.
@@ -47,20 +86,14 @@ pub struct ArpNote {
     /// Lead oscillator frequency (Osc2 Saw) - plays current arp note
     pub lead_freq: f32,
 
-    /// Whether bass should play this note (true every 4th note)
-    pub bass_active: bool,
-
     /// Gate state (true = note on, false = note off/silence for articulation)
     pub gate_active: bool,
 }
 
 /// Arpeggiator state: clock, pattern tracking, root frequency.
 pub struct Arpeggiator {
-    /// Root frequency in Hz (from master pitch)
+    /// Root frequency in Hz (arp lead melody pitch)
     root_freq: f32,
-
-    /// Bass frequency cached at -1 octave (public field per CLAUDE.md style)
-    pub bass_freq: f32,
 
     /// Arp clock rate in Hz (1-20 Hz, controlled by Pot 4)
     rate_hz: f32,
@@ -71,7 +104,7 @@ pub struct Arpeggiator {
     /// Phase increment per buffer tick (rate_hz / BUFFER_RATE)
     phase_inc: f32,
 
-    /// Current position in chord pattern (0-3 for C major)
+    /// Current position in active scale pattern
     note_index: usize,
 
     /// Arpeggiator playback mode (Up/Down/UpDown/Random)
@@ -83,18 +116,22 @@ pub struct Arpeggiator {
     /// Direction for UpDown mode (true = ascending, false = descending)
     direction_up: bool,
 
-    /// LFSR random number generator for Random mode
+    /// LFSR random number generator for Random mode and chord selection
     rng: WhiteNoise,
+
+    /// Currently active chord index (into ALL_CHORDS)
+    active_chord_index: usize,
+
+    /// Note counter for chord change interval
+    notes_played: usize,
 }
 
 impl Arpeggiator {
     /// Create new arpeggiator with default rate and Up mode.
     pub fn new() -> Self {
         let rate_hz = ARP_RATE_DEFAULT;
-        let root_freq = 220.0; // A3 - will be overwritten by master pitch
         Self {
-            root_freq,
-            bass_freq: root_freq / 2.0, // -1 octave
+            root_freq: 220.0, // A3 - will be overwritten by arp pitch pot
             rate_hz,
             phase: 0.0,
             phase_inc: rate_hz / BUFFER_RATE,
@@ -103,6 +140,8 @@ impl Arpeggiator {
             transpose: 0,
             direction_up: true,
             rng: WhiteNoise::new(),
+            active_chord_index: 0, // Start with minor triad
+            notes_played: 0,
         }
     }
 
@@ -124,10 +163,10 @@ impl Arpeggiator {
         self.phase_inc = rate_hz / BUFFER_RATE;
     }
 
-    /// Set root frequency (from master pitch).
+    /// Set root frequency (arp lead melody pitch).
+    /// Bass frequency is independent, fixed at BASS_FIXED_FREQ.
     pub fn set_root_freq(&mut self, freq: f32) {
         self.root_freq = freq;
-        self.bass_freq = freq / 2.0; // Cache bass at -1 octave
     }
 
     /// Tick arpeggiator clock (called at buffer rate ~172 Hz).
@@ -142,8 +181,9 @@ impl Arpeggiator {
             self.advance_note();
         }
 
-        // Get current semitone offset from chord pattern
-        let chord_semitones = CHORD_MAJOR[self.note_index];
+        // Get current semitone offset from active chord
+        let active_chord = ALL_CHORDS[self.active_chord_index];
+        let chord_semitones = active_chord[self.note_index];
 
         // Apply transpose (±12 semitones)
         let total_semitones = chord_semitones + self.transpose;
@@ -162,29 +202,29 @@ impl Arpeggiator {
         // Calculate lead frequency (root × ratio)
         let lead_freq = self.root_freq * ratio;
 
-        // Bass active only on beat 1 (note_index == 0, every 4th note)
-        let bass_active = self.note_index == 0;
-
         // Gate: active for first 80% of note cycle, silent for last 20%
         let gate_active = self.phase < ARP_GATE_LENGTH;
 
         ArpNote {
             lead_freq,
-            bass_active,
             gate_active,
         }
     }
 
     /// Advance to next note based on current mode.
+    /// Also handles chord switching: after completing a pattern cycle + reaching interval.
     #[inline]
     fn advance_note(&mut self) {
+        let active_chord = ALL_CHORDS[self.active_chord_index];
+        let chord_len = active_chord.len();
+
         match self.mode {
             ArpMode::Up => {
-                self.note_index = (self.note_index + 1) % CHORD_MAJOR.len();
+                self.note_index = (self.note_index + 1) % chord_len;
             }
             ArpMode::Down => {
                 if self.note_index == 0 {
-                    self.note_index = CHORD_MAJOR.len() - 1;
+                    self.note_index = chord_len - 1;
                 } else {
                     self.note_index -= 1;
                 }
@@ -192,7 +232,7 @@ impl Arpeggiator {
             ArpMode::UpDown => {
                 if self.direction_up {
                     self.note_index += 1;
-                    if self.note_index >= CHORD_MAJOR.len() - 1 {
+                    if self.note_index >= chord_len - 1 {
                         self.direction_up = false;
                     }
                 } else {
@@ -203,8 +243,24 @@ impl Arpeggiator {
                 }
             }
             ArpMode::Random => {
-                self.note_index = self.rng.next_usize(CHORD_MAJOR.len());
+                self.note_index = self.rng.next_usize(chord_len);
             }
+        }
+
+        // Count notes played
+        self.notes_played += 1;
+
+        // Chord switching: on pattern wrap + interval reached
+        if self.note_index == 0 && self.notes_played >= ARP_SCALE_CHANGE_INTERVAL {
+            // Pick a random chord (ensure different from current)
+            let new_chord_index = loop {
+                let candidate = self.rng.next_usize(ALL_CHORDS.len());
+                if candidate != self.active_chord_index {
+                    break candidate;
+                }
+            };
+            self.active_chord_index = new_chord_index;
+            self.notes_played = 0; // Reset counter
         }
     }
 }
