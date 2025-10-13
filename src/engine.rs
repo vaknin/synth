@@ -1,13 +1,19 @@
 //! Engine module: manages generative voices, processes messages, renders audio.
 
 use crate::clock::Clock;
-use crate::config::{FILTER_ENVELOPE_DECAY_COEFF, MASTER_GAIN};
+use crate::config::{BASS_GAIN, FILTER_ENVELOPE_DECAY_COEFF, LEAD_GAIN, MASTER_GAIN};
 use crate::filter::{soft_clip, MoogLadderFilter};
 use crate::lfo::LFO;
 use crate::message::Message;
 use crate::slew::Slew;
 use crate::voice::Voice;
 use crate::{AudioStream, ChannelReceiver, I16_MAX_F32};
+
+// Debug storage for buffer-rate logging (updated at audio rate, read at buffer rate)
+static mut LAST_BASS: f32 = 0.0;
+static mut LAST_LEAD: f32 = 0.0;
+static mut LAST_MIX: f32 = 0.0;
+static mut LAST_FILTERED: f32 = 0.0;
 
 /// Main synth engine with generative voices (Turing Machine + Euclidean rhythms).
 pub struct Engine {
@@ -52,9 +58,6 @@ impl Engine {
         // Create voices (portamento already set in constructors)
         let mut bass_voice = Voice::bass();
         let mut lead_voice = Voice::lead();
-        // lead_voice.osc1.set_level(0.0);
-        // lead_voice.osc2.set_level(0.0);
-        // bass_voice.osc2.set_level(0.0);
 
         // Set Phrygian scale (index 7): dark, hypnotic, perfect for techno
         let phrygian_normalized = 7.0 / 11.0;
@@ -158,6 +161,24 @@ impl Engine {
     /// BUFFER RATE: Update cached parameters once per buffer.
     #[inline]
     fn update_buffer_parameters(&mut self) {
+        // Debug diagnostics (buffer rate only - ~172 Hz, negligible overhead)
+        static mut FRAME_COUNT: u32 = 0;
+        unsafe {
+            FRAME_COUNT += 1;
+            // Log every ~0.5 seconds (86 buffers)
+            if FRAME_COUNT % 86 == 0 {
+                log::info!(
+                    "Filter: cut={:.0}Hz res={:.2} | Bass={:+.3} Lead={:+.3} Mix={:+.3} Filt={:+.3}",
+                    self.filter.cutoff,
+                    self.filter.resonance,
+                    LAST_BASS,
+                    LAST_LEAD,
+                    LAST_MIX,
+                    LAST_FILTERED
+                );
+            }
+        }
+
         // Clock-driven generative steps
         if self.clock.tick() {
             // Check if lead voice fires a gate AND is audible (trigger filter envelope)
@@ -205,11 +226,23 @@ impl Engine {
         let bass = self.bass_voice.render();
         let lead = self.lead_voice.render();
 
-        // Mix voices with proper headroom
-        let mix = (bass + lead) * 0.5;
+        // Mix voices with gain staging (bass attenuated, lead prominent)
+        let mix = bass * BASS_GAIN + lead * LEAD_GAIN;
+
+        // Debug: Log levels periodically (buffer rate in update_buffer_parameters)
+        // Store last mix/filter values for diagnostics
+        unsafe {
+            LAST_BASS = bass;
+            LAST_LEAD = lead;
+            LAST_MIX = mix;
+        }
 
         // Process through Moog Ladder Filter (can exceed ±1.0 at high resonance)
         let filtered = self.filter.process(mix);
+
+        unsafe {
+            LAST_FILTERED = filtered;
+        }
 
         // Soft-clip prevents digital clipping while preserving musical character
         soft_clip(filtered)

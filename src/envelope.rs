@@ -57,6 +57,15 @@ impl ADEnvelope {
         self.level = 0.0;
     }
 
+    /// Check if envelope is active (not idle).
+    ///
+    /// Returns false only when envelope has fully decayed to 0 and entered Idle.
+    /// Used for CPU optimization - skips rendering voices during silence between notes.
+    #[inline(always)]
+    pub fn is_active(&self) -> bool {
+        self.stage != EnvelopeStage::Idle
+    }
+
     /// Set attack time dynamically.
     ///
     /// # Arguments

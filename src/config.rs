@@ -81,6 +81,16 @@ pub const POLYBLEP_THRESHOLD_PHASE_INC: f32 = POLYBLEP_THRESHOLD_HZ / SAMPLE_RAT
 /// Provides headroom even when all voices are at max volume.
 pub const MASTER_GAIN: f32 = 0.90;
 
+/// Bass voice gain (continuous drone, attenuated to prevent overpowering lead).
+/// Lower than lead because: continuous (no envelope), psychoacoustic bass loudness,
+/// and to leave space for melodic elements.
+pub const BASS_GAIN: f32 = 0.55;
+
+/// Lead voice gain (melodic prominence with headroom for overlapping notes).
+/// With 12 overlapping notes at max density, this prevents clipping while
+/// maintaining clarity over the bass foundation.
+pub const LEAD_GAIN: f32 = 0.75;
+
 // === Wavetable ===
 
 /// Wavetable size (must remain a power of two for fast wrapping).

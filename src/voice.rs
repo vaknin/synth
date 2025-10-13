@@ -165,11 +165,25 @@ impl Voice {
         )
     }
 
-    /// Check if voice is audible (at least one oscillator above silence threshold).
+    /// Check if voice is audible (oscillators AND envelope active).
+    ///
+    /// Performance-critical: called every audio sample to skip silent voice rendering.
+    /// For lead, skips rendering when envelope is Idle (between notes).
+    /// Trades ~1.5ms of inaudible tail rendering for guaranteed attack preservation.
     #[inline]
     pub fn is_audible(&self) -> bool {
-        self.osc1.level.current() >= OSC_SILENCE_THRESHOLD
-            || self.osc2.level.current() >= OSC_SILENCE_THRESHOLD
+        // Check oscillator levels first (short-circuit if both silent)
+        let osc_audible = self.osc1.level.current() >= OSC_SILENCE_THRESHOLD
+            || self.osc2.level.current() >= OSC_SILENCE_THRESHOLD;
+
+        // If voice has envelope (lead), check if envelope is active (not Idle)
+        // Must use stage check, not level check, to avoid cutting off note attacks
+        if let Some(envelope) = &self.envelope {
+            osc_audible && envelope.is_active()
+        } else {
+            // Bass voice (no envelope) - just check oscillators
+            osc_audible
+        }
     }
 
     /// Process one clock step (rhythm + melody generation).
