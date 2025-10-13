@@ -178,47 +178,6 @@ impl Potentiometer {
 // === Parameter Mapping Functions ===
 // Each function specifies its curve + range for clear, maintainable behavior.
 
-/// Map normalized value (0.0-1.0) to master pitch frequency.
-///
-/// Uses Linear + Geometric: equal octaves per pot rotation (musically correct).
-/// 4-768 Hz = 7.58 octaves, each 10% pot travel = ~0.758 octaves.
-pub fn map_master_pitch(normalized: f32) -> Message {
-    let freq = map_range(
-        normalized,
-        Curve::Linear,
-        Range::Geometric {
-            min: FREQUENCY_MIN,
-            ratio: FREQUENCY_MAX / FREQUENCY_MIN, // 768/4 = 192 (const-folded)
-        },
-    );
-    Message::SetMasterPitch(freq)
-}
-
-/// Map normalized value (0.0-1.0) to oscillator level.
-///
-/// Uses Power + Linear for logarithmic amplitude response.
-/// Matches human hearing perception - feels smooth and even across pot travel.
-pub fn map_osc_level(osc_id: crate::message::OscillatorId, normalized: f32) -> Message {
-    let level = map_range(normalized, Curve::Power, Range::Linear { min: 0.0, max: 1.0 });
-    Message::SetOscLevel(osc_id, level)
-}
-
-/// Map normalized value (0.0-1.0) to detune in cents.
-///
-/// Uses Quadratic + Bipolar for fine control near center (0¢),
-/// fast changes at edges (±DETUNE_RANGE_CENTS).
-/// Perfect for dialing in subtle beating effects!
-pub fn map_osc_detune(osc_id: crate::message::OscillatorId, normalized: f32) -> Message {
-    let cents = map_range(
-        normalized,
-        Curve::Quadratic,
-        Range::Bipolar {
-            range: DETUNE_RANGE_CENTS,
-        },
-    );
-    Message::SetOscDetune(osc_id, cents)
-}
-
 /// Map normalized value (0.0-1.0) to filter cutoff frequency.
 ///
 /// Uses Linear + Geometric for perceptually even octave spacing.
@@ -301,22 +260,6 @@ pub fn map_tempo(normalized: f32) -> Message {
         },
     );
     Message::SetTempo(bpm)
-}
-
-/// Map normalized value (0.0-1.0) to bass Euclidean hits.
-/// Value of 0 mutes the voice (rhythm advances silently to keep polyrhythms locked).
-pub fn map_bass_euclidean_hits(normalized: f32) -> Message {
-    use crate::config::BASS_EUCLIDEAN_LENGTH;
-
-    let hits = map_range(
-        normalized,
-        Curve::Linear,
-        Range::Linear {
-            min: 0.0,
-            max: BASS_EUCLIDEAN_LENGTH as f32,
-        },
-    );
-    Message::SetBassEuclideanHits(hits.round() as usize)
 }
 
 /// Map normalized value (0.0-1.0) to lead Euclidean hits (0-16).

@@ -157,18 +157,18 @@ pub enum Waveform {
 /// Correction residual to subtract from naive waveform
 ///
 /// Reference: Välimäki & Huovilainen (2007) "Antialiasing Oscillators"
-#[inline(always)]
+#[inline]
 fn poly_blep(phase: f32, phase_inc: f32, phase_inc_reciprocal: f32) -> f32 {
     // Forward discontinuity (0 < phase < phase_inc)
     if phase < phase_inc {
         let t = phase * phase_inc_reciprocal; // Multiply by reciprocal instead of divide
-        // Polynomial: 2t - t² - 1
+                                              // Polynomial: 2t - t² - 1
         t + t - t * t - 1.0
     }
     // Backward discontinuity (1 - phase_inc < phase < 1)
     else if phase > 1.0 - phase_inc {
         let t = (phase - 1.0) * phase_inc_reciprocal; // Multiply by reciprocal instead of divide
-        // Polynomial: t² + 2t + 1
+                                                      // Polynomial: t² + 2t + 1
         t * t + t + t + 1.0
     }
     // No discontinuity nearby
@@ -275,7 +275,7 @@ impl Oscillator {
     /// * `coeff` - Smoothing coefficient (clamped to PORTAMENTO_COEFF_MIN..MAX)
     #[inline]
     pub fn set_portamento_coeff(&mut self, coeff: f32) {
-        use crate::config::{PORTAMENTO_COEFF_MIN, PORTAMENTO_COEFF_MAX};
+        use crate::config::{PORTAMENTO_COEFF_MAX, PORTAMENTO_COEFF_MIN};
         let clamped = coeff.clamp(PORTAMENTO_COEFF_MIN, PORTAMENTO_COEFF_MAX);
         self.phase_increment.set_coeff(clamped);
     }
@@ -344,7 +344,7 @@ impl Oscillator {
                 // Bass: 65-184 Hz → always takes fast path (no reciprocal division)
                 // Lead: 260-2080 Hz → applies PolyBLEP only when pitch > 1000 Hz
                 if phase_inc < POLYBLEP_THRESHOLD_PHASE_INC {
-                    naive  // Fast path: no anti-aliasing needed
+                    naive // Fast path: no anti-aliasing needed
                 } else {
                     // Compute reciprocal only when needed (avoid division on bass voice)
                     let phase_inc_reciprocal = 1.0 / phase_inc;
@@ -358,12 +358,11 @@ impl Oscillator {
                 // PolyBLEP anti-aliasing: smooth both rising and falling edges
                 // Same threshold optimization as Saw (bass always skips for performance)
                 if phase_inc < POLYBLEP_THRESHOLD_PHASE_INC {
-                    naive  // Fast path: no anti-aliasing needed
+                    naive // Fast path: no anti-aliasing needed
                 } else {
                     let phase_inc_reciprocal = 1.0 / phase_inc;
                     // Apply correction at both 0.0 (rising edge) and 0.5 (falling edge)
-                    naive
-                        - poly_blep(self.phase, phase_inc, phase_inc_reciprocal)
+                    naive - poly_blep(self.phase, phase_inc, phase_inc_reciprocal)
                         + poly_blep((self.phase + 0.5) % 1.0, phase_inc, phase_inc_reciprocal)
                 }
             }

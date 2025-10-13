@@ -72,21 +72,16 @@ pub struct Engine {
 impl Engine {
     /// Create new engine with generative voices.
     pub fn new(receiver: ChannelReceiver) -> Self {
-        // Create voices with fixed scale (Phrygian) and portamento
+        // Create voices (portamento already set in constructors)
         let mut bass_voice = Voice::bass();
         let mut lead_voice = Voice::lead();
+        lead_voice.osc1.set_level(0.0);
+        lead_voice.osc2.set_level(0.0);
 
         // Set Phrygian scale (index 7): dark, hypnotic, perfect for techno
         let phrygian_normalized = 7.0 / 11.0;
         bass_voice.quantizer.set_scale(phrygian_normalized);
         lead_voice.quantizer.set_scale(phrygian_normalized);
-
-        // Set portamento to 0.996 (~60ms glide, melodic but electronic)
-        const TECHNO_PORTAMENTO: f32 = 0.996;
-        bass_voice.osc1.set_portamento_coeff(TECHNO_PORTAMENTO);
-        bass_voice.osc2.set_portamento_coeff(TECHNO_PORTAMENTO);
-        lead_voice.osc1.set_portamento_coeff(TECHNO_PORTAMENTO);
-        lead_voice.osc2.set_portamento_coeff(TECHNO_PORTAMENTO);
 
         Self {
             clock: Clock::new(),
@@ -140,12 +135,10 @@ impl Engine {
                     self.clock.set_bpm(bpm);
                 }
 
-                Message::SetBassEuclideanHits(hits) => {
-                    self.bass_voice.euclidean.set_hits(hits);
-                }
-
                 Message::SetLeadEuclideanHits(hits) => {
-                    self.lead_voice.euclidean.set_hits(hits);
+                    if let Some(euclidean) = &mut self.lead_voice.euclidean {
+                        euclidean.set_hits(hits);
+                    }
                 }
 
                 Message::SetScale(scale_idx) => {
@@ -164,21 +157,22 @@ impl Engine {
 
                 Message::SetFilterEnvelopeDepth(depth) => {
                     // depth is 0.0-1.0, scale to Hz using config constant
-                    self.filter_envelope_depth =
-                        depth * crate::config::FILTER_ENVELOPE_DEPTH_MAX;
+                    self.filter_envelope_depth = depth * crate::config::FILTER_ENVELOPE_DEPTH_MAX;
                 }
 
                 Message::SetAttack(attack_ms) => {
-                    self.bass_voice.envelope.set_attack_ms(attack_ms);
-                    self.lead_voice.envelope.set_attack_ms(attack_ms);
+                    // Only lead has envelope
+                    if let Some(envelope) = &mut self.lead_voice.envelope {
+                        envelope.set_attack_ms(attack_ms);
+                    }
                 }
 
                 Message::SetDecay(decay_ms) => {
-                    self.bass_voice.envelope.set_decay_ms(decay_ms);
-                    self.lead_voice.envelope.set_decay_ms(decay_ms);
+                    // Only lead has envelope
+                    if let Some(envelope) = &mut self.lead_voice.envelope {
+                        envelope.set_decay_ms(decay_ms);
+                    }
                 }
-
-                _ => {} // Ignore old oscillator messages
             }
         }
     }
@@ -188,19 +182,19 @@ impl Engine {
     fn update_buffer_parameters(&mut self) {
         // Clock-driven generative steps
         if self.clock.tick() {
-            // Check if either voice fires a gate (trigger filter envelope)
-            // Read current position before stepping (step() advances position)
-            let bass_gate_position = self.bass_voice.euclidean.position;
-            let lead_gate_position = self.lead_voice.euclidean.position;
-            let bass_gate = self.bass_voice.euclidean.pattern[bass_gate_position];
-            let lead_gate = self.lead_voice.euclidean.pattern[lead_gate_position];
+            // Check if lead voice fires a gate AND is audible (trigger filter envelope)
+            let lead_gate = if let Some(euclidean) = &self.lead_voice.euclidean {
+                euclidean.pattern[euclidean.position]
+            } else {
+                false
+            };
 
-            if bass_gate || lead_gate {
-                // Trigger filter envelope jump (Design 1: rhythm-synced filter)
+            if lead_gate && self.lead_voice.is_audible() {
+                // Trigger filter envelope jump on lead hits (only if lead is playing)
                 self.filter_envelope_offset = self.filter_envelope_depth;
             }
 
-            // Step voices (advances euclidean position, generates notes)
+            // Step voices (bass ticks Turing slowly, lead uses Euclidean)
             self.bass_voice.step();
             self.lead_voice.step();
 
@@ -212,8 +206,7 @@ impl Engine {
                 / ((1 << self.lead_voice.turing.loop_length) - 1) as f32;
             let turing_avg = (bass_turing_norm + lead_turing_norm) * 0.5;
             // Map 0.0-1.0 → ±FILTER_TURING_MODULATION_RANGE Hz
-            self.filter_turing_offset =
-                (turing_avg - 0.5) * (FILTER_TURING_MODULATION_RANGE * 2.0);
+            self.filter_turing_offset = (turing_avg - 0.5) * (FILTER_TURING_MODULATION_RANGE * 2.0);
         }
 
         // Decay filter envelope exponentially at buffer rate

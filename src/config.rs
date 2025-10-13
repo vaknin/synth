@@ -177,9 +177,9 @@ pub const CENTS_TO_OCTAVES: f32 = 1.0 / 1200.0;
 // === Moog Ladder Filter ===
 
 /// Minimum cutoff frequency for Moog Ladder Filter (Hz).
-/// 20 Hz reaches sub-bass territory for extreme filtering effects.
+/// 80 Hz allows bass fundamentals through while enabling deep filtering.
 /// Moog ladder handles the full audible spectrum with no stability constraints.
-pub const FILTER_CUTOFF_MIN: f32 = FREQUENCY_MIN * 50.0;
+pub const FILTER_CUTOFF_MIN: f32 = 80.0;
 
 /// Maximum cutoff frequency for Moog Ladder Filter (Hz).
 /// Extended to 20 kHz to cover the full audible spectrum.
@@ -239,21 +239,20 @@ pub const OCTAVE_MULTIPLIER: f32 = 2.0;
 /// Two octaves separation for harmonic voice alignment.
 pub const TWO_OCTAVES: f32 = OCTAVE_MULTIPLIER * OCTAVE_MULTIPLIER;
 
-/// Bass voice root frequency (C2 - deep but audible bass territory).
-/// 65 Hz balances sub-bass power with melodic clarity and speaker translation.
-pub const BASS_ROOT_HZ: f32 = 65.0;
+/// Bass voice root frequency (F1 - deep but audible bass territory).
+/// 45 Hz balances sub-bass power with melodic clarity and speaker translation.
+pub const BASS_ROOT_HZ: f32 = 45.0;
 
-/// Bass voice octave range (controlled melodic movement).
-/// 1.5 octaves keeps bass low and tight while allowing melodic variation.
-pub const BASS_OCTAVE_RANGE: f32 = 1.5;
+/// Bass voice octave range (subtle, drone-like movement).
+pub const BASS_OCTAVE_RANGE: f32 = 1.0;
 
 /// Lead voice root frequency (C4 - 2 octaves above bass for harmonic alignment).
 /// Both voices share same root note (C) for consonant polyrhythmic interplay.
 pub const LEAD_ROOT_HZ: f32 = BASS_ROOT_HZ * TWO_OCTAVES;
 
-/// Lead voice octave range (dramatic melodic jumps).
-/// 3.0 octaves enables wide, expressive lead melodies.
-pub const LEAD_OCTAVE_RANGE: f32 = 3.0;
+/// Lead voice octave range (melodic jumps without excessive leaps).
+/// 1.5 octaves balances expressiveness with stepwise melodic contour.
+pub const LEAD_OCTAVE_RANGE: f32 = 1.5;
 
 /// Initial euclidean hits (immediately overwritten by pot ADC values).
 /// Set to 1 for safe, silent startup until pots are read.
@@ -285,8 +284,8 @@ pub const TURING_LOOP_LENGTH_MAX: usize = 32;
 pub const TURING_LOOP_LENGTH_DEFAULT: usize = 16;
 
 /// Bass voice Turing loop length (fixed, no pot control).
-/// 10 bits = medium-short phrases for grounding, stable bass foundation.
-pub const BASS_TURING_LOOP_LENGTH: usize = 10;
+/// 8 bits = 256 states for smooth evolving bass patterns.
+pub const BASS_TURING_LOOP_LENGTH: usize = 8;
 
 /// Lead voice Turing loop length (fixed, no pot control).
 /// 20 bits = medium-long evolving phrases without excessive randomness.
@@ -301,22 +300,35 @@ pub const TURING_MUTATION_MAX: f32 = 0.5;
 pub const TURING_MUTATION_DEFAULT: f32 = 0.05;
 
 /// Bass voice mutation rate (fixed, no pot control).
-/// 4% = stable anchor, slowly evolving bass patterns.
-pub const BASS_MUTATION_RATE: f32 = 0.04;
+/// 2% = very stable drone, glacial evolution.
+pub const BASS_MUTATION_RATE: f32 = 0.05;
 
 /// Lead voice mutation rate (fixed, no pot control).
-/// 28% = melodic exploration without excessive chaos.
-pub const LEAD_MUTATION_RATE: f32 = 0.28;
+/// 25% = melodic exploration, restless but musical.
+pub const LEAD_MUTATION_RATE: f32 = 0.25;
 
 // === Harmonic Anchoring ===
 
 /// Bass voice harmonic anchoring interval (steps).
 /// Returns to root note every 8 steps for solid tonal foundation.
-pub const BASS_ANCHOR_INTERVAL: usize = 8;
+pub const BASS_ANCHOR_INTERVAL: usize = 2;
 
 /// Lead voice harmonic anchoring interval (steps).
 /// Returns to root note every 16 steps for melodic resolution points.
 pub const LEAD_ANCHOR_INTERVAL: usize = 16;
+
+/// Bass Turing tick divisor (ticks every N clock steps).
+/// 16 = bass changes pitch every 16 clock ticks (every ~2 seconds @ 120 BPM).
+/// Slow evolution creates hypnotic, drifting bass foundation under rhythmic lead.
+pub const BASS_TURING_TICK_DIVISOR: usize = 16;
+
+/// Bass portamento coefficient (slower, more vocal-like glides).
+/// 0.997 provides ~100ms glide for smooth harmonic transitions.
+pub const BASS_PORTAMENTO_COEFF: f32 = 0.997;
+
+/// Lead portamento coefficient (faster, more articulate).
+/// 0.995 provides ~50ms glide for legato but responsive melodies.
+pub const LEAD_PORTAMENTO_COEFF: f32 = 0.995;
 
 // === Master Clock ===
 
