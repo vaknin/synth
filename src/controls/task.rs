@@ -2,8 +2,8 @@
 
 use crate::config::*;
 use crate::controls::{
-    map_attack, map_cutoff, map_decay, map_filter_envelope_depth, map_lead_euclidean_hits,
-    map_lfo_depth, map_lfo_rate, map_resonance, CtrlSender, Potentiometer,
+    map_bass_cutoff, map_bass_lfo_depth, map_bass_lfo_rate, map_bass_resonance, map_decay,
+    map_lead_cutoff, map_lead_euclidean_hits, map_lead_resonance, CtrlSender, Potentiometer,
 };
 use crate::hardware::{AdcBus, AnyAdcPin};
 use embassy_time::{Duration, Timer};
@@ -13,22 +13,24 @@ use embassy_time::{Duration, Timer};
 /// Owns the ADC peripheral and all pot pins. Each pot has independent
 /// signal processing state (EMA filter, deadband) but shares the hardware.
 ///
-/// Current 8-pot setup (bass drone + lead generative):
-/// - Pot 1 (GPIO1): Filter Cutoff (main performance control)
-/// - Pot 2 (GPIO2): Filter Resonance (Moog character)
-/// - Pot 3 (GPIO3): Filter Envelope Depth (rhythm-synced plucks)
-/// - Pot 4 (GPIO4): Filter LFO Rate (sweep speed)
-/// - Pot 5 (GPIO5): Filter LFO Depth (modulation amount)
-/// - Pot 6 (GPIO6): Envelope Attack (lead articulation)
-/// - Pot 7 (GPIO7): Envelope Decay (lead sustain)
+/// Current 8-pot setup (per-voice filters for spectral separation):
+///
+/// **Bass Zone (GPIO1-4):**
+/// - Pot 1 (GPIO1): Bass Filter Cutoff
+/// - Pot 2 (GPIO2): Bass Filter Resonance
+/// - Pot 3 (GPIO3): Bass LFO Rate (evolving drone)
+/// - Pot 4 (GPIO4): Bass LFO Depth
+///
+/// **Lead Zone (GPIO5-8):**
+/// - Pot 5 (GPIO5): Lead Filter Cutoff
+/// - Pot 6 (GPIO6): Lead Filter Resonance
+/// - Pot 7 (GPIO7): Lead Envelope Decay (attack hardcoded to 5ms)
 /// - Pot 8 (GPIO8): Lead Euclidean Hits (rhythm density)
 ///
 /// Fixed generative parameters:
-/// - Bass: Continuous drone, see BASS_* constants in config.rs
-/// - Lead: Euclidean rhythm, see LEAD_* constants in config.rs
-/// - Tempo: CLOCK_BPM_DEFAULT (hardcoded for now)
-/// - Scale: Phrygian (dark, hypnotic, perfect for techno)
-/// - Portamento: See BASS_PORTAMENTO_COEFF and LEAD_PORTAMENTO_COEFF
+/// - Tempo: CLOCK_BPM_DEFAULT
+/// - Scale: Phrygian (dark, hypnotic)
+/// - Portamento: BASS_PORTAMENTO_COEFF, LEAD_PORTAMENTO_COEFF
 ///
 /// # Arguments
 /// * `sender` - Embassy channel sender for control messages
@@ -36,16 +38,18 @@ use embassy_time::{Duration, Timer};
 /// * `pins` - Array of type-erased ADC pins (owned by this task)
 #[embassy_executor::task]
 pub async fn pot_task(sender: CtrlSender, mut adc_bus: AdcBus, mut pins: [AnyAdcPin; 8]) {
-    // Create pot state objects with mapping functions
+    // Create pot state objects with mapping functions (split bass/lead zones)
     let mut pots = [
-        Potentiometer::new(map_cutoff),                // Pot 1 (GPIO1)
-        Potentiometer::new(map_resonance),             // Pot 2 (GPIO2)
-        Potentiometer::new(map_filter_envelope_depth), // Pot 3 (GPIO3)
-        Potentiometer::new(map_lfo_rate),              // Pot 4 (GPIO4)
-        Potentiometer::new(map_lfo_depth),             // Pot 5 (GPIO5)
-        Potentiometer::new(map_attack),                // Pot 6 (GPIO6)
-        Potentiometer::new(map_decay),                 // Pot 7 (GPIO7)
-        Potentiometer::new(map_lead_euclidean_hits),   // Pot 8 (GPIO8)
+        // Bass Zone (GPIO1-4)
+        Potentiometer::new(map_bass_cutoff),         // Pot 1 (GPIO1)
+        Potentiometer::new(map_bass_resonance),      // Pot 2 (GPIO2)
+        Potentiometer::new(map_bass_lfo_rate),       // Pot 3 (GPIO3)
+        Potentiometer::new(map_bass_lfo_depth),      // Pot 4 (GPIO4)
+        // Lead Zone (GPIO5-8)
+        Potentiometer::new(map_lead_cutoff),         // Pot 5 (GPIO5)
+        Potentiometer::new(map_lead_resonance),      // Pot 6 (GPIO6)
+        Potentiometer::new(map_decay),               // Pot 7 (GPIO7)
+        Potentiometer::new(map_lead_euclidean_hits), // Pot 8 (GPIO8)
     ];
 
     loop {

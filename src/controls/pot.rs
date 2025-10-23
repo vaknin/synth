@@ -178,10 +178,12 @@ impl Potentiometer {
 // === Parameter Mapping Functions ===
 // Each function specifies its curve + range for clear, maintainable behavior.
 
-/// Map normalized value (0.0-1.0) to filter cutoff frequency.
+// === BASS FILTER MAPPING ===
+
+/// Map normalized value (0.0-1.0) to bass filter cutoff frequency.
 ///
 /// Uses Linear + Geometric for perceptually even octave spacing.
-pub fn map_cutoff(normalized: f32) -> Message {
+pub fn map_bass_cutoff(normalized: f32) -> Message {
     use crate::config::{FILTER_CUTOFF_MAX, FILTER_CUTOFF_MIN};
 
     let freq = map_range(
@@ -189,17 +191,16 @@ pub fn map_cutoff(normalized: f32) -> Message {
         Curve::Linear,
         Range::Geometric {
             min: FILTER_CUTOFF_MIN,
-            ratio: FILTER_CUTOFF_MAX / FILTER_CUTOFF_MIN, // 15000/200 = 75 (const-folded)
+            ratio: FILTER_CUTOFF_MAX / FILTER_CUTOFF_MIN,
         },
     );
-    Message::SetCutoff(freq)
+    Message::SetBassCutoff(freq)
 }
 
-/// Map normalized value (0.0-1.0) to filter resonance.
+/// Map normalized value (0.0-1.0) to bass filter resonance.
 ///
 /// Uses Linear curve for even control across full pot range.
-/// Fine-grained control in usable resonance territory (1.0-2.5).
-pub fn map_resonance(normalized: f32) -> Message {
+pub fn map_bass_resonance(normalized: f32) -> Message {
     use crate::config::{FILTER_RESONANCE_MAX, FILTER_RESONANCE_MIN};
 
     let resonance = map_range(
@@ -210,13 +211,13 @@ pub fn map_resonance(normalized: f32) -> Message {
             max: FILTER_RESONANCE_MAX,
         },
     );
-    Message::SetResonance(resonance)
+    Message::SetBassResonance(resonance)
 }
 
-/// Map normalized value (0.0-1.0) to LFO rate.
+/// Map normalized value (0.0-1.0) to bass LFO rate.
 ///
 /// Uses Linear + Geometric for equal decades per pot rotation.
-pub fn map_lfo_rate(normalized: f32) -> Message {
+pub fn map_bass_lfo_rate(normalized: f32) -> Message {
     use crate::config::{LFO_FREQUENCY_MAX, LFO_FREQUENCY_MIN};
 
     let rate = map_range(
@@ -224,23 +225,58 @@ pub fn map_lfo_rate(normalized: f32) -> Message {
         Curve::Linear,
         Range::Geometric {
             min: LFO_FREQUENCY_MIN,
-            ratio: LFO_FREQUENCY_MAX / LFO_FREQUENCY_MIN, // 10/0.01 = 1000 (const-folded)
+            ratio: LFO_FREQUENCY_MAX / LFO_FREQUENCY_MIN,
         },
     );
-    Message::SetFilterLfoRate(rate)
+    Message::SetBassLfoRate(rate)
 }
 
-/// Map normalized value (0.0-1.0) to LFO depth.
+/// Map normalized value (0.0-1.0) to bass LFO depth.
 ///
 /// Uses Linear + Linear for direct, predictable modulation amount.
-/// Engine converts depth to Hz range (±2 octaves from base cutoff).
-pub fn map_lfo_depth(normalized: f32) -> Message {
+pub fn map_bass_lfo_depth(normalized: f32) -> Message {
     let depth = map_range(
         normalized,
         Curve::Linear,
         Range::Linear { min: 0.0, max: 1.0 },
     );
-    Message::SetFilterLfoDepth(depth)
+    Message::SetBassLfoDepth(depth)
+}
+
+// === LEAD FILTER MAPPING ===
+
+/// Map normalized value (0.0-1.0) to lead filter cutoff frequency.
+///
+/// Uses Linear + Geometric for perceptually even octave spacing.
+pub fn map_lead_cutoff(normalized: f32) -> Message {
+    use crate::config::{FILTER_CUTOFF_MAX, FILTER_CUTOFF_MIN};
+
+    let freq = map_range(
+        normalized,
+        Curve::Linear,
+        Range::Geometric {
+            min: FILTER_CUTOFF_MIN,
+            ratio: FILTER_CUTOFF_MAX / FILTER_CUTOFF_MIN,
+        },
+    );
+    Message::SetLeadCutoff(freq)
+}
+
+/// Map normalized value (0.0-1.0) to lead filter resonance.
+///
+/// Uses Linear curve for even control across full pot range.
+pub fn map_lead_resonance(normalized: f32) -> Message {
+    use crate::config::{FILTER_RESONANCE_MAX, FILTER_RESONANCE_MIN};
+
+    let resonance = map_range(
+        normalized,
+        Curve::Linear,
+        Range::Linear {
+            min: FILTER_RESONANCE_MIN,
+            max: FILTER_RESONANCE_MAX,
+        },
+    );
+    Message::SetLeadResonance(resonance)
 }
 
 // === GENERATIVE PARAMETER MAPPING ===
@@ -284,36 +320,6 @@ pub fn map_lead_euclidean_hits(normalized: f32) -> Message {
 pub fn map_scale(normalized: f32) -> Message {
     let scale_idx = (normalized * 11.99).floor() as usize;
     Message::SetScale(scale_idx.min(11))
-}
-
-/// Map normalized value (0.0-1.0) to filter envelope depth.
-///
-/// Controls the intensity of rhythm-synced filter plucks (0 = static, 1 = dramatic jumps).
-pub fn map_filter_envelope_depth(normalized: f32) -> Message {
-    let depth = map_range(
-        normalized,
-        Curve::Linear,
-        Range::Linear { min: 0.0, max: 1.0 },
-    );
-    Message::SetFilterEnvelopeDepth(depth)
-}
-
-/// Map normalized value (0.0-1.0) to envelope attack time.
-///
-/// Uses Power + Linear for fine control at fast attacks (percussive territory),
-/// with smooth expansion toward pad-like attacks.
-pub fn map_attack(normalized: f32) -> Message {
-    use crate::config::{ENVELOPE_ATTACK_POT_MIN_MS, ENVELOPE_ATTACK_POT_MAX_MS};
-
-    let attack_ms = map_range(
-        normalized,
-        Curve::Power,
-        Range::Linear {
-            min: ENVELOPE_ATTACK_POT_MIN_MS,
-            max: ENVELOPE_ATTACK_POT_MAX_MS,
-        },
-    );
-    Message::SetAttack(attack_ms)
 }
 
 /// Map normalized value (0.0-1.0) to envelope decay time.

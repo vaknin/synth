@@ -3,21 +3,25 @@
 /// Messages sent from control tasks (pots, encoders) to audio task.
 #[derive(Debug, Clone, Copy)]
 pub enum Message {
-    // === FILTER PARAMETERS ===
-    /// Set filter cutoff frequency (Hz, mapped from pot)
-    SetCutoff(f32),
+    // === BASS FILTER PARAMETERS ===
+    /// Set bass filter cutoff frequency (Hz, mapped from pot)
+    SetBassCutoff(f32),
 
-    /// Set filter resonance (0.0-4.0, mapped from pot)
-    SetResonance(f32),
+    /// Set bass filter resonance (0.0-4.0, mapped from pot)
+    SetBassResonance(f32),
 
-    /// Set filter cutoff LFO rate in Hz (0.01-10.0 Hz exponential)
-    SetFilterLfoRate(f32),
+    /// Set bass filter cutoff LFO rate in Hz (0.01-10.0 Hz exponential)
+    SetBassLfoRate(f32),
 
-    /// Set filter cutoff LFO depth (0.0-1.0)
-    SetFilterLfoDepth(f32),
+    /// Set bass filter cutoff LFO depth (0.0-1.0)
+    SetBassLfoDepth(f32),
 
-    /// Set filter envelope depth (0.0-1.0, controls rhythm-synced filter pluck intensity)
-    SetFilterEnvelopeDepth(f32),
+    // === LEAD FILTER PARAMETERS ===
+    /// Set lead filter cutoff frequency (Hz, mapped from pot)
+    SetLeadCutoff(f32),
+
+    /// Set lead filter resonance (0.0-4.0, mapped from pot)
+    SetLeadResonance(f32),
 
     // === GENERATIVE PARAMETERS ===
     /// Set global tempo in BPM (20-220)
@@ -32,9 +36,6 @@ pub enum Message {
     /// Set portamento smoothing coefficient (0.95-0.998, shared for all voices)
     SetPortamento(f32),
 
-    /// Set envelope attack time in milliseconds (lead voice only)
-    SetAttack(f32),
-
-    /// Set envelope decay time in milliseconds (lead voice only)
+    /// Set envelope decay time in milliseconds (lead voice only, attack hardcoded to 5ms)
     SetDecay(f32),
 }

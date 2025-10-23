@@ -84,7 +84,7 @@ pub const MASTER_GAIN: f32 = 0.90;
 /// Bass voice gain (continuous drone, attenuated to prevent overpowering lead).
 /// Lower than lead because: continuous (no envelope), psychoacoustic bass loudness,
 /// and to leave space for melodic elements.
-pub const BASS_GAIN: f32 = 0.55;
+pub const BASS_GAIN: f32 = 0.35;
 
 /// Lead voice gain (melodic prominence with headroom for overlapping notes).
 /// With 12 overlapping notes at max density, this prevents clipping while
@@ -245,10 +245,10 @@ pub const TWO_OCTAVES: f32 = OCTAVE_MULTIPLIER * OCTAVE_MULTIPLIER;
 
 /// Bass voice root frequency (F1 - deep but audible bass territory).
 /// 45 Hz balances sub-bass power with melodic clarity and speaker translation.
-pub const BASS_ROOT_HZ: f32 = 45.0;
+pub const BASS_ROOT_HZ: f32 = 95.0;
 
 /// Bass voice octave range (subtle, drone-like movement).
-pub const BASS_OCTAVE_RANGE: f32 = 1.0;
+pub const BASS_OCTAVE_RANGE: f32 = 1.5;
 
 /// Lead voice root frequency (C4 - 2 octaves above bass for harmonic alignment).
 /// Both voices share same root note (C) for consonant polyrhythmic interplay.
@@ -360,9 +360,9 @@ pub const CLOCK_TEMPO_SLEW_MS: f32 = 500.0;
 
 // === Envelope ===
 
-/// Envelope attack time in milliseconds (fixed).
-/// Fast attack for percussive, punchy articulation.
-pub const ENVELOPE_ATTACK_MS: f32 = 10.0;
+/// Envelope attack time in milliseconds (hardcoded, no pot control).
+/// Very fast attack for percussive, punchy articulation.
+pub const ENVELOPE_ATTACK_MS: f32 = 5.0;
 
 /// Default envelope decay time in milliseconds.
 /// Sustained decay for flowing generative melodies with overlapping phrases.
@@ -376,24 +376,8 @@ pub const ENVELOPE_DECAY_MIN_MS: f32 = 1000.0;
 /// Long end of dynamic decay range for sustained, flowing phrases.
 pub const ENVELOPE_DECAY_MAX_MS: f32 = 1500.0;
 
-/// Pot-controllable attack range: minimum (instant, percussive).
-pub const ENVELOPE_ATTACK_POT_MIN_MS: f32 = 1.0;
-
-/// Pot-controllable attack range: maximum (soft, pad-like).
-pub const ENVELOPE_ATTACK_POT_MAX_MS: f32 = 200.0;
-
 /// Pot-controllable decay range: minimum (tight techno stabs).
 pub const ENVELOPE_DECAY_POT_MIN_MS: f32 = 10.0;
 
 /// Pot-controllable decay range: maximum (long sustain for melodies).
 pub const ENVELOPE_DECAY_POT_MAX_MS: f32 = 2000.0;
-
-// === Rhythm-Synced Filter ===
-
-/// Maximum filter envelope depth in Hz (pot-controlled from 0 to this value).
-/// Filter jumps by this amount on Euclidean gate, then decays back to baseline.
-pub const FILTER_ENVELOPE_DEPTH_MAX: f32 = 500.0;
-
-/// Filter envelope decay coefficient (exponential decay).
-/// 0.992 provides tempo-synced decay (~200ms at buffer rate ~172 Hz).
-pub const FILTER_ENVELOPE_DECAY_COEFF: f32 = 0.992;

@@ -14,7 +14,6 @@ use crate::euclidean::EuclideanRhythm;
 use crate::oscillator::{Oscillator, Waveform};
 use crate::quantizer::Quantizer;
 use crate::turing::TuringMachine;
-use micromath::F32Ext;
 
 /// Self-contained generative voice.
 ///
@@ -31,11 +30,8 @@ pub struct Voice {
     /// Scale quantizer (snaps Turing output to musical scales)
     pub quantizer: Quantizer,
 
-    /// Primary oscillator
-    pub osc1: Oscillator,
-
-    /// Secondary oscillator (detuned +5¢ for thickness)
-    pub osc2: Oscillator,
+    /// Single oscillator (one per voice for clean spectral separation)
+    pub osc: Oscillator,
 
     /// Amplitude envelope (None for bass drone, Some for lead articulation)
     pub envelope: Option<ADEnvelope>,
@@ -62,8 +58,7 @@ impl Voice {
         euclidean: Option<(usize, usize)>, // (hits, length) or None for bass
         root_freq: f32,
         octave_range: f32,
-        waveform1: Waveform,
-        waveform2: Waveform,
+        waveform: Waveform,
         turing_loop_length: usize,
         mutation_rate: f32,
         anchor_interval: usize,
@@ -71,16 +66,10 @@ impl Voice {
         portamento_coeff: f32,
         use_envelope: bool,
     ) -> Self {
-        // Oscillator 1: primary voice
-        let mut osc1 = Oscillator::new(waveform1);
-        osc1.set_frequency(root_freq);
-        osc1.set_portamento_coeff(portamento_coeff);
-
-        // Oscillator 2: detuned +1¢ for subtle thickness
-        let mut osc2 = Oscillator::new(waveform2);
-        osc2.set_detune_cents(0.0);
-        osc2.set_frequency(root_freq);
-        osc2.set_portamento_coeff(portamento_coeff);
+        // Single oscillator per voice (clean spectral separation)
+        let mut osc = Oscillator::new(waveform);
+        osc.set_frequency(root_freq);
+        osc.set_portamento_coeff(portamento_coeff);
 
         // Initialize Turing Machine
         let mut turing = TuringMachine::new();
@@ -101,8 +90,7 @@ impl Voice {
             euclidean: euclidean_rhythm,
             turing,
             quantizer: Quantizer::new(root_freq, octave_range),
-            osc1,
-            osc2,
+            osc,
             envelope,
             step_count: 0,
             anchor_interval,
@@ -122,14 +110,13 @@ impl Voice {
     /// - Euclidean: None (continuous sound)
     /// - Envelope: None (always full level)
     /// - Portamento: BASS_PORTAMENTO_COEFF (smooth glide)
-    /// - Waveforms: Saw (bright harmonics) + Sine (pure sub-bass weight)
+    /// - Waveform: Sine (pure sub-bass foundation, no harmonics competing with lead)
     pub fn bass() -> Self {
         Self::new(
             None, // No Euclidean - continuous drone
             BASS_ROOT_HZ,
             BASS_OCTAVE_RANGE,
-            Waveform::Saw,
-            Waveform::Sine,
+            Waveform::Sine, // Pure sine - clean low end
             BASS_TURING_LOOP_LENGTH,
             BASS_MUTATION_RATE,
             BASS_ANCHOR_INTERVAL,
@@ -148,14 +135,13 @@ impl Voice {
     /// - Euclidean: Yes (rhythmic patterns via pot control)
     /// - Envelope: Yes (attack-decay articulation)
     /// - Portamento: LEAD_PORTAMENTO_COEFF (articulate glide)
-    /// - Waveforms: Square (nasal, cutting) + Saw (harmonic richness)
+    /// - Waveform: Saw (bright harmonics for melodic presence)
     pub fn lead() -> Self {
         Self::new(
             Some((EUCLIDEAN_INITIAL_HITS, LEAD_EUCLIDEAN_LENGTH)), // Euclidean rhythm
             LEAD_ROOT_HZ,
             LEAD_OCTAVE_RANGE,
-            Waveform::Square,
-            Waveform::Saw,
+            Waveform::Saw, // Bright saw for melodic lead
             LEAD_TURING_LOOP_LENGTH,
             LEAD_MUTATION_RATE,
             LEAD_ANCHOR_INTERVAL,
@@ -165,23 +151,22 @@ impl Voice {
         )
     }
 
-    /// Check if voice is audible (oscillators AND envelope active).
+    /// Check if voice is audible (oscillator AND envelope active).
     ///
     /// Performance-critical: called every audio sample to skip silent voice rendering.
     /// For lead, skips rendering when envelope is Idle (between notes).
     /// Trades ~1.5ms of inaudible tail rendering for guaranteed attack preservation.
     #[inline]
     pub fn is_audible(&self) -> bool {
-        // Check oscillator levels first (short-circuit if both silent)
-        let osc_audible = self.osc1.level.current() >= OSC_SILENCE_THRESHOLD
-            || self.osc2.level.current() >= OSC_SILENCE_THRESHOLD;
+        // Check oscillator level first (short-circuit if silent)
+        let osc_audible = self.osc.level.current() >= OSC_SILENCE_THRESHOLD;
 
         // If voice has envelope (lead), check if envelope is active (not Idle)
         // Must use stage check, not level check, to avoid cutting off note attacks
         if let Some(envelope) = &self.envelope {
             osc_audible && envelope.is_active()
         } else {
-            // Bass voice (no envelope) - just check oscillators
+            // Bass voice (no envelope) - just check oscillator
             osc_audible
         }
     }
@@ -233,9 +218,8 @@ impl Voice {
                 self.quantizer.quantize(adjusted_value)
             };
 
-            // Update oscillators (portamento smooths the transition)
-            self.osc1.set_frequency(pitch_hz);
-            self.osc2.set_frequency(pitch_hz);
+            // Update oscillator (portamento smooths the transition)
+            self.osc.set_frequency(pitch_hz);
 
             // Trigger envelope if present (lead only)
             if let Some(envelope) = &mut self.envelope {
@@ -257,15 +241,15 @@ impl Voice {
             return 0.0;
         }
 
-        // Mix 2 oscillators (osc2 detuned +5¢ for thickness)
-        let mix = (self.osc1.tick() + self.osc2.tick()) * 0.5;
+        // Render single oscillator (clean spectral role per voice)
+        let sample = self.osc.tick();
 
         // Apply envelope if present (lead), otherwise full level (bass drone)
         if let Some(envelope) = &mut self.envelope {
             let env_level = envelope.tick();
-            mix * env_level
+            sample * env_level
         } else {
-            mix // Bass: always full level, continuous sound
+            sample // Bass: always full level, continuous sound
         }
     }
 }
