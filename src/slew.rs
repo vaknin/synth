@@ -4,7 +4,7 @@
 //! parameter changes. Essential for frequency, volume, filter cutoff, and any
 //! other parameter that changes rapidly during audio rendering.
 
-use crate::config::{SMOOTHING_COEFF as SLEW_COEFF, SLEW_SETTLE_THRESHOLD};
+use crate::config::{SLEW_SETTLE_THRESHOLD, SMOOTHING_COEFF as SLEW_COEFF};
 
 /// Generic parameter smoother using exponential moving average (EMA).
 ///

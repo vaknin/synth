@@ -3,9 +3,13 @@
 
 // === System Architecture ===
 
-/// Stack size for Core 1 (APP_CPU) - Embassy executor + ADC polling task.
-/// 4KB provides headroom for current 6-pot system (~2.5KB) and future 20-pot expansion (~3.5KB).
-pub const APP_CORE_STACK_SIZE: usize = 4096; //4096 is a pretty good/safe value
+/// Stack size for Core 1 (APP_CPU) - Embassy executor + ADC polling + display rendering.
+/// 12KB accounts for:
+/// - Embassy executor overhead (~1-2KB)
+/// - DisplayDriver with cached WaveformData (~2KB)
+/// - pot_task with 2 Potentiometer structs
+/// - display_task: embedded-graphics creates 127 temporary Line objects per frame
+pub const APP_CORE_STACK_SIZE: usize = 12288;
 
 // === Synth Engine ===
 
@@ -17,6 +21,9 @@ pub const VOICE_COUNT: usize = 3;
 /// 44.1 kHz keeps compatibility with consumer audio equipment.
 pub const SAMPLE_RATE: u32 = 44_100;
 
+/// Sample rate as f32 (pre-computed to avoid runtime casts).
+pub const SAMPLE_RATE_F32: f32 = SAMPLE_RATE as f32;
+
 /// Buffer callback rate in Hz (DMA interrupt frequency).
 /// Each stereo frame = 4 bytes (2 channels × 2 bytes per i16 sample).
 /// Calculated as: SAMPLE_RATE / (DMA_BUFFER_SIZE / 4)
@@ -27,6 +34,19 @@ pub const BUFFER_RATE: f32 = SAMPLE_RATE as f32 / (DMA_BUFFER_SIZE / 4) as f32;
 /// Higher values = more smoothing = slower response. Prevents clicks and zipper noise.
 /// 0.99 provides ~10ms settling time at 44.1kHz - settles within pot update interval (20ms).
 pub const SMOOTHING_COEFF: f32 = 0.99;
+
+/// Default portamento smoothing coefficient for oscillator pitch transitions.
+/// Slower than SMOOTHING_COEFF for expressive, vocal-like melodic glides.
+/// 0.995 provides ~50ms settling time at 44.1kHz for smooth generative melodies.
+pub const PORTAMENTO_SMOOTHING_COEFF: f32 = 0.995;
+
+/// Minimum portamento smoothing coefficient (fast transitions).
+/// 0.95 provides ~10ms settling time for snappy, percussive melodies.
+pub const PORTAMENTO_COEFF_MIN: f32 = 0.95;
+
+/// Maximum portamento smoothing coefficient (slow transitions).
+/// 0.998 provides ~150ms settling time for vocal-like, legato phrases.
+pub const PORTAMENTO_COEFF_MAX: f32 = 0.998;
 
 /// Slew limiter settling threshold (amplitude units).
 /// When error between current and target falls below this threshold, snap to target and mark settled.
@@ -175,6 +195,13 @@ pub const FILTER_RESONANCE_MIN: f32 = 0.1;
 /// Higher values overdrive the feedback path, losing the characteristic Moog tone.
 pub const FILTER_RESONANCE_MAX: f32 = 2.0;
 
+/// Denormal prevention threshold for filter state variables.
+/// Zeros out filter state when it decays below this value to prevent FPU slowdown.
+/// 1e-15 is ~-300dB (completely inaudible, below -140dB noise floor) but well above
+/// denormal range (< 1.18e-38). Critical for ESP32-S3 performance - denormals cause
+/// 100× slowdown. Filter state reaches denormals in 2-26ms of silence.
+pub const FILTER_DENORMAL_THRESHOLD: f32 = 1e-15;
+
 // === LFO (Low-Frequency Oscillator) ===
 
 /// Minimum LFO frequency (Hz).
@@ -201,3 +228,63 @@ pub const GENERATIVE_OCTAVE_RANGE_MIN: f32 = 1.0;
 /// Maximum octave range for generative voices (dramatic, wide jumps).
 /// Determines lookup table size: ±(MAX × 12 semitones) = ±48 semitones.
 pub const GENERATIVE_OCTAVE_RANGE_MAX: f32 = 4.0;
+
+// === Display (SSD1351 OLED) ===
+
+pub const DISPLAY_WIDTH: u32 = 128;
+pub const DISPLAY_HEIGHT: u32 = 128;
+
+/// Display refresh rate: 30Hz (39% util), 60Hz (78% util), 120Hz (high).
+pub const DISPLAY_REFRESH_RATE_HZ: u32 = 120;
+
+pub const DISPLAY_REFRESH_INTERVAL_MS: u64 = 1000 / DISPLAY_REFRESH_RATE_HZ as u64;
+
+/// SPI clock: 20 MHz max (SSD1351 datasheet limit).
+pub const DISPLAY_SPI_FREQUENCY_HZ: u32 = 20_000_000;
+
+// === Waveform Visualization ===
+
+/// Circular buffer: 1024 samples (8× display width), ~2KB RAM.
+pub const WAVEFORM_BUFFER_SIZE: usize = (DISPLAY_WIDTH as usize) * 8;
+
+/// Oscilloscope zoom (time/div): 20ms (tight), 50ms (balanced), 100ms (wide), 200ms+ (zoomed out).
+/// Smaller = waveform appears wider/slower. Independent of refresh rate.
+pub const WAVEFORM_TIME_WINDOW_MS: u32 = 20;
+
+/// Decimation factor: fixed rate ensuring >= 1 sample/pixel at TIME_WINDOW.
+/// Independent of refresh rate for consistent zoom across all configurations.
+pub const WAVEFORM_DECIMATION_FACTOR: u32 = {
+    let min_decimated_rate_needed = (DISPLAY_WIDTH * 1000) / WAVEFORM_TIME_WINDOW_MS;
+    SAMPLE_RATE / min_decimated_rate_needed
+};
+
+/// SPSC queue capacity (power-of-2 for optimal heapless performance).
+pub const WAVEFORM_QUEUE_CAPACITY: usize = 2;
+
+/// Samples per pixel (uses decimated rate, not raw 44.1kHz).
+/// Derived from TIME_WINDOW_MS, independent of refresh rate.
+pub const WAVEFORM_SAMPLES_PER_PIXEL: f32 =
+    ((SAMPLE_RATE / WAVEFORM_DECIMATION_FACTOR) as f32 * WAVEFORM_TIME_WINDOW_MS as f32 / 1000.0)
+        / DISPLAY_WIDTH as f32;
+
+/// Scroll rate for time-based continuous scrolling (samples per frame).
+/// Matches decimated sample production rate: decimated_rate ÷ refresh_rate.
+/// Ensures scroll velocity perfectly matches audio production at any refresh rate.
+pub const WAVEFORM_SCROLL_RATE: f32 =
+    (SAMPLE_RATE / WAVEFORM_DECIMATION_FACTOR) as f32 / DISPLAY_REFRESH_RATE_HZ as f32;
+
+/// Safety margin: ensures full TIME_WINDOW is readable without hitting write pointer.
+/// Window samples (~147) + generous margin for safety.
+pub const WAVEFORM_SAFE_DISTANCE: usize = {
+    let window_samples = ((SAMPLE_RATE / WAVEFORM_DECIMATION_FACTOR) as f32
+        * WAVEFORM_TIME_WINDOW_MS as f32
+        / 1000.0) as usize;
+    window_samples + 32
+};
+
+/// Waveform send interval: send data every N decimated samples to match display refresh rate.
+/// Ensures write_index stays fresh while avoiding queue overflow.
+/// Derived from: floor(decimated_rate / display_rate) = floor(882 Hz / 120 Hz) = 7 samples.
+/// Send rate: (SAMPLE_RATE / DECIMATION_FACTOR) / SEND_INTERVAL ≈ 126 Hz (slightly ahead of 120 Hz).
+pub const WAVEFORM_SEND_INTERVAL: usize =
+    ((SAMPLE_RATE / WAVEFORM_DECIMATION_FACTOR) / DISPLAY_REFRESH_RATE_HZ) as usize;

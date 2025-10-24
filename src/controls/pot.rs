@@ -176,48 +176,7 @@ impl Potentiometer {
 }
 
 // === Parameter Mapping Functions ===
-// Each function specifies its curve + range for clear, maintainable behavior.
-
-/// Map normalized value (0.0-1.0) to master pitch frequency.
-///
-/// Uses Linear + Geometric: equal octaves per pot rotation (musically correct).
-/// 4-768 Hz = 7.58 octaves, each 10% pot travel = ~0.758 octaves.
-pub fn map_master_pitch(normalized: f32) -> Message {
-    let freq = map_range(
-        normalized,
-        Curve::Linear,
-        Range::Geometric {
-            min: FREQUENCY_MIN,
-            ratio: FREQUENCY_MAX / FREQUENCY_MIN, // 768/4 = 192 (const-folded)
-        },
-    );
-    Message::SetMasterPitch(freq)
-}
-
-/// Map normalized value (0.0-1.0) to oscillator level.
-///
-/// Uses Power + Linear for logarithmic amplitude response.
-/// Matches human hearing perception - feels smooth and even across pot travel.
-pub fn map_osc_level(osc_id: crate::message::OscillatorId, normalized: f32) -> Message {
-    let level = map_range(normalized, Curve::Power, Range::Linear { min: 0.0, max: 1.0 });
-    Message::SetOscLevel(osc_id, level)
-}
-
-/// Map normalized value (0.0-1.0) to detune in cents.
-///
-/// Uses Quadratic + Bipolar for fine control near center (0¢),
-/// fast changes at edges (±DETUNE_RANGE_CENTS).
-/// Perfect for dialing in subtle beating effects!
-pub fn map_osc_detune(osc_id: crate::message::OscillatorId, normalized: f32) -> Message {
-    let cents = map_range(
-        normalized,
-        Curve::Quadratic,
-        Range::Bipolar {
-            range: DETUNE_RANGE_CENTS,
-        },
-    );
-    Message::SetOscDetune(osc_id, cents)
-}
+// Simplified for drone synth: only filter cutoff and resonance.
 
 /// Map normalized value (0.0-1.0) to filter cutoff frequency.
 ///
@@ -253,35 +212,4 @@ pub fn map_resonance(normalized: f32) -> Message {
         },
     );
     Message::SetResonance(resonance)
-}
-
-/// Map normalized value (0.0-1.0) to LFO rate.
-///
-/// Uses Linear + Geometric for equal decades per pot rotation.
-/// 0.01-10 Hz = 3 decades (0.01→0.1→1.0→10), musically useful range.
-pub fn map_lfo_rate(normalized: f32) -> Message {
-    use crate::config::{LFO_FREQUENCY_MAX, LFO_FREQUENCY_MIN};
-
-    let rate = map_range(
-        normalized,
-        Curve::Linear,
-        Range::Geometric {
-            min: LFO_FREQUENCY_MIN,
-            ratio: LFO_FREQUENCY_MAX / LFO_FREQUENCY_MIN, // 10/0.01 = 1000 (const-folded)
-        },
-    );
-    Message::SetFilterLfoRate(rate)
-}
-
-/// Map normalized value (0.0-1.0) to LFO depth.
-///
-/// Uses Linear + Linear for direct, predictable modulation amount.
-/// Engine converts depth to Hz range (±2 octaves from base cutoff).
-pub fn map_lfo_depth(normalized: f32) -> Message {
-    let depth = map_range(
-        normalized,
-        Curve::Linear,
-        Range::Linear { min: 0.0, max: 1.0 },
-    );
-    Message::SetFilterLfoDepth(depth)
 }

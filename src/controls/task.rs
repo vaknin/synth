@@ -1,42 +1,29 @@
-//! Control tasks: potentiometers and future encoders.
+//! Control tasks: potentiometers polling for drone synth.
 
 use crate::config::*;
-use crate::controls::{map_master_pitch, map_osc_detune, map_osc_level, map_resonance, CtrlSender, Potentiometer};
+use crate::controls::{map_cutoff, map_resonance, CtrlSender, Potentiometer};
 use crate::hardware::{AdcBus, AnyAdcPin};
-use crate::message::OscillatorId;
 use embassy_time::{Duration, Timer};
 
-/// Potentiometer polling task: sequentially reads all pots.
+/// Potentiometer polling task: sequentially reads 2 pots.
 ///
 /// Owns the ADC peripheral and all pot pins. Each pot has independent
 /// signal processing state (EMA filter, deadband) but shares the hardware.
 ///
-/// Current 8-pot setup:
-/// - Pot 0 (GPIO1): Master Pitch
-/// - Pot 1 (GPIO2): Osc1 Level
-/// - Pot 2 (GPIO3): Osc2 Detune
-/// - Pot 3 (GPIO4): Osc2 Level
-/// - Pot 4 (GPIO5): Filter Cutoff
-/// - Pot 5 (GPIO6): Filter Resonance
-/// - Pot 6 (GPIO7): Filter LFO Rate
-/// - Pot 7 (GPIO8): Filter LFO Depth
+/// Simplified 2-pot setup for drone synth:
+/// - Pot 0 (GPIO1): Filter Cutoff
+/// - Pot 1 (GPIO2): Filter Resonance
 ///
 /// # Arguments
 /// * `sender` - Embassy channel sender for control messages
 /// * `adc_bus` - ADC bus with ADC peripheral (owned by this task)
-/// * `pins` - Array of type-erased ADC pins (owned by this task)
+/// * `pins` - Array of 2 type-erased ADC pins (owned by this task)
 #[embassy_executor::task]
-pub async fn pot_task(sender: CtrlSender, mut adc_bus: AdcBus, mut pins: [AnyAdcPin; 8]) {
+pub async fn pot_task(sender: CtrlSender, mut adc_bus: AdcBus, mut pins: [AnyAdcPin; 2]) {
     // Create pot state objects with mapping functions
     let mut pots = [
-        Potentiometer::new(map_master_pitch),
-        Potentiometer::new(|n| map_osc_level(OscillatorId::Osc1, n)),
-        Potentiometer::new(|n| map_osc_detune(OscillatorId::Osc2, n)),
-        Potentiometer::new(|n| map_osc_level(OscillatorId::Osc2, n)),
-        Potentiometer::new(crate::controls::map_cutoff),
-        Potentiometer::new(map_resonance),
-        Potentiometer::new(crate::controls::map_lfo_rate),
-        Potentiometer::new(crate::controls::map_lfo_depth),
+        Potentiometer::new(map_cutoff),    // GPIO1
+        Potentiometer::new(map_resonance), // GPIO2
     ];
 
     loop {

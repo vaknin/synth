@@ -1,21 +1,44 @@
 //! Engine module: manages oscillators, processes messages, renders audio.
 
-use crate::config::{FREQUENCY_MIN, MASTER_GAIN};
+use crate::config::{
+    MASTER_GAIN, WAVEFORM_BUFFER_SIZE, WAVEFORM_DECIMATION_FACTOR, WAVEFORM_SEND_INTERVAL,
+};
 use crate::filter::MoogLadderFilter;
 use crate::lfo::LFO;
-use crate::message::Message;
+use crate::message::{Message, WaveformData};
 use crate::oscillator::{Oscillator, Waveform};
 use crate::slew::Slew;
-use crate::{AudioStream, ChannelReceiver, I16_MAX_F32};
+use crate::{AudioStream, ChannelReceiver, WaveformProducer, I16_MAX_F32};
 
-/// Main synth engine managing direct oscillators (monophonic architecture).
+/// Waveform capture state for oscilloscope visualization.
+///
+/// Captures every Nth audio sample (decimation) for display on OLED.
+/// When buffer is full, sends to display task via SPSC queue.
+struct WaveformCapture {
+    /// Sample buffer (128 i16 samples = 256 bytes)
+    buffer: [i16; WAVEFORM_BUFFER_SIZE],
+
+    /// Decimation counter (capture every WAVEFORM_DECIMATION_FACTOR samples)
+    decimation_counter: u32,
+
+    /// Current write position in buffer (0-127)
+    write_index: usize,
+}
+
+impl WaveformCapture {
+    fn new() -> Self {
+        Self {
+            buffer: [0; WAVEFORM_BUFFER_SIZE],
+            decimation_counter: 0,
+            write_index: 0,
+        }
+    }
+}
+
+/// Main synth engine - simplified drone synth with single oscillator.
 pub struct Engine {
-    /// Array of 4 oscillators [Osc1(Sine), Osc2(Saw), Osc3(Square), Sub(Sine)]
-    oscillators: [Oscillator; 4],
-
-    /// Cached reciprocal of level sum for fast normalization (multiply instead of divide)
-    /// Smoothed at audio rate to prevent zipper noise when oscillator levels change
-    level_sum_reciprocal: Slew,
+    /// Single sine oscillator at 110Hz (A2 drone, always on)
+    oscillator: Oscillator,
 
     /// Message receiver from control tasks
     consumer: ChannelReceiver,
@@ -36,6 +59,12 @@ pub struct Engine {
     /// LFO modulation range in Hz (depth pot → Hz range)
     lfo_cutoff_range: f32,
 
+    /// Waveform capture state for oscilloscope display
+    waveform_capture: WaveformCapture,
+
+    /// SPSC producer for sending waveform data to display (Core 0 → Core 1)
+    waveform_producer: WaveformProducer,
+
     /// Profiling: accumulated statistics (only compiled with 'profile' feature)
     #[cfg(feature = "profile")]
     profile_stats: ProfileStats,
@@ -50,31 +79,22 @@ struct ProfileStats {
 }
 
 impl Engine {
-    /// Create new engine with 4 initialized oscillators and message receiver.
+    /// Create new engine with single drone oscillator and message receiver.
     ///
     /// # Arguments
     /// * `receiver` - Embassy channel receiver for control messages
+    /// * `waveform_producer` - SPSC producer for sending waveform data to display
     ///
     /// # Returns
-    /// Engine with oscillators at FREQUENCY_MIN, all silent (level=0.0).
-    /// Pot messages arrive within ~20ms and Slew smooths to actual positions.
-    pub fn new(receiver: ChannelReceiver) -> Self {
+    /// Engine with single sine oscillator at 110Hz (A2), always on at full level.
+    pub fn new(receiver: ChannelReceiver, waveform_producer: WaveformProducer) -> Self {
+        // Single sine oscillator configured as drone (110Hz A2, full level)
+        let mut oscillator = Oscillator::new(Waveform::Sine);
+        oscillator.set_frequency(110.0); // A2 note
+        oscillator.set_level(1.0); // Always on, full volume
+
         Self {
-            // Array of 4 oscillators: Sine, Saw, Square, Sub (-1 oct)
-            // All start silent (level=0.0), pot messages arrive in ~20ms
-            oscillators: [
-                Oscillator::new(Waveform::Sine),
-                Oscillator::new(Waveform::Saw),
-                Oscillator::new(Waveform::Square),
-                {
-                    let mut sub = Oscillator::new(Waveform::Square);
-                    sub.set_frequency(FREQUENCY_MIN / 4.0); // Sub at -1 octave
-                    sub.set_level(0.0); // Full level (no pot control yet)
-                    sub
-                },
-            ],
-            // Normalization factor: starts at 1.0 (neutral), smoothed at audio rate to prevent zipper
-            level_sum_reciprocal: Slew::new(1.0),
+            oscillator,
             consumer: receiver,
             // Soft-start gain: 0.0 → 1.0 over ~10ms (prevents speaker pop)
             soft_start_gain: {
@@ -91,7 +111,9 @@ impl Engine {
                 crate::config::LFO_DEPTH_DEFAULT,
             ),
             base_cutoff: crate::config::FILTER_CUTOFF_MIN,
-            lfo_cutoff_range: 0.0,
+            lfo_cutoff_range: 0.0, // LFO disabled - no modulation applied
+            waveform_capture: WaveformCapture::new(),
+            waveform_producer,
             #[cfg(feature = "profile")]
             profile_stats: ProfileStats {
                 buffer_count: 0,
@@ -102,68 +124,16 @@ impl Engine {
         }
     }
 
-    /// Set master pitch for all oscillators (respects per-oscillator detune).
-    ///
-    /// # Arguments
-    /// * `frequency` - Base frequency in Hz (sub-oscillator plays at half frequency)
-    fn set_master_pitch(&mut self, frequency: f32) {
-        // Update Osc1, Osc2, Osc3 with base frequency
-        for osc in &mut self.oscillators[0..3] {
-            osc.set_frequency(frequency);
-        }
-
-        // Sub-oscillator plays at -1 octave (half frequency)
-        self.oscillators[3].set_frequency(frequency / 2.0);
-    }
-
     /// BUFFER RATE (~172 Hz): Drain control message queue and update parameter targets.
     ///
     /// Called once per buffer. Processes all pending messages from pot polling (50Hz).
     /// May process 0, 1, or multiple messages per buffer depending on pot activity.
     ///
-    /// Messages set target values for parameters that smooth at their respective rates:
-    /// - Oscillator freq/level → Audio-rate Slew (smoothed in render_sample())
-    /// - Filter cutoff/resonance → Direct (marks dirty for coefficient recalc)
-    /// - Normalization factor → Audio-rate Slew (smoothed in render_sample())
+    /// Simplified for drone synth: only handles filter cutoff and resonance.
     #[inline]
     fn consume_messages(&mut self) {
         while let Ok(msg) = self.consumer.try_receive() {
             match msg {
-                Message::SetMasterPitch(freq) => {
-                    self.set_master_pitch(freq);
-                }
-
-                Message::SetOscLevel(osc_id, level) => {
-                    if let Some(osc) = self.oscillators.get_mut(osc_id as usize) {
-                        // Read old level for incremental sum update
-                        let old_level = osc.level.target();
-
-                        // Update oscillator level
-                        osc.set_level(level);
-
-                        // Incrementally update cached level sum reciprocal
-                        // level_sum_new = level_sum_old - old_level + new_level
-                        // reciprocal = 1.0 / level_sum_new
-                        let old_sum = 1.0 / self.level_sum_reciprocal.target();
-                        let new_sum = old_sum - old_level + level;
-
-                        let new_reciprocal = if new_sum > 0.0 {
-                            1.0 / new_sum
-                        } else {
-                            1.0 // Avoid division by zero (all silent)
-                        };
-
-                        // Smooth at audio rate to prevent zipper noise
-                        self.level_sum_reciprocal.set_target(new_reciprocal);
-                    }
-                }
-
-                Message::SetOscDetune(osc_id, cents) => {
-                    if let Some(osc) = self.oscillators.get_mut(osc_id as usize) {
-                        osc.set_detune_cents(cents);
-                    }
-                }
-
                 Message::SetCutoff(freq) => {
                     self.base_cutoff = freq;
                 }
@@ -171,35 +141,21 @@ impl Engine {
                 Message::SetResonance(q) => {
                     self.filter.set_resonance(q);
                 }
-
-                Message::SetFilterLfoRate(rate) => {
-                    self.filter_lfo.set_frequency(rate);
-                }
-
-                Message::SetFilterLfoDepth(depth) => {
-                    self.filter_lfo.depth = depth;
-                    // Convert depth (0.0-1.0) to Hz range (±2 octaves = 4× multiplier)
-                    self.lfo_cutoff_range = self.base_cutoff * 3.0 * depth;
-                }
             }
         }
     }
 
     /// BUFFER RATE (~172 Hz): Update cached parameters once per buffer.
     ///
-    /// Called before processing each DMA buffer to recalculate coefficients
-    /// that don't need audio-rate smoothing. LFO modulation applied here.
+    /// Called before processing each DMA buffer to recalculate filter coefficients.
+    /// LFO is disabled (lfo_cutoff_range = 0.0), so cutoff is applied directly.
     #[inline]
     fn update_buffer_parameters(&mut self) {
         // Oscillator parameters: No-op (level/pitch smoothed at audio rate for responsiveness)
-        for osc in &mut self.oscillators {
-            osc.update_parameters();
-        }
+        self.oscillator.update_parameters();
 
-        // LFO modulation: tick at buffer rate, apply to filter cutoff
-        let lfo_value = self.filter_lfo.tick();
-        let modulated_cutoff = self.base_cutoff + (lfo_value * self.lfo_cutoff_range);
-        self.filter.set_cutoff(modulated_cutoff);
+        // Set filter cutoff directly (no LFO modulation)
+        self.filter.set_cutoff(self.base_cutoff);
 
         // Filter coefficients: OPTIMIZED - smoothed at buffer rate (only parameter that works well here)
         self.filter.update_coefficients();
@@ -207,26 +163,19 @@ impl Engine {
 
     /// AUDIO RATE (44,100 Hz): Render one audio sample - SUPER HOT PATH!
     ///
-    /// OPTIMIZED: Filter coefficients cached at buffer rate, performance params at audio rate.
-    /// - Oscillator tick() smooths pitch & level at audio rate (responsive control)
-    /// - Normalization smoothed at audio rate (settled optimization keeps it cheap)
-    /// - Filter processes with cached coefficients (ONLY param smoothed at buffer rate)
+    /// Simplified for single drone oscillator:
+    /// - Single oscillator tick() (no mixing, no normalization)
+    /// - Filter processing with cached coefficients
     ///
     /// # Returns
     /// Filtered mono sample (before master gain and soft-start)
     #[inline]
     fn render_sample(&mut self) -> f32 {
-        // Sum all oscillators (tick() smooths both pitch & level at audio rate)
-        let mix: f32 = self.oscillators.iter_mut().map(|osc| osc.tick()).sum();
-
-        // Normalize by sum of oscillator levels (smoothed at audio rate, cheap when settled)
-        let normalized = mix * self.level_sum_reciprocal.value();
+        // Single oscillator tick (110Hz A2 drone at full level)
+        let sample = self.oscillator.tick();
 
         // Process through Moog Ladder Filter (lowpass only, cached coefficients)
-        let filtered = self.filter.process(normalized);
-
-        filtered
-        // normalized
+        self.filter.process(sample)
     }
 
     /// Render audio samples into the DMA buffer.
@@ -268,6 +217,31 @@ impl Engine {
                     chunk[1] = bytes[1];
                     chunk[2] = bytes[0];
                     chunk[3] = bytes[1];
+
+                    // === WAVEFORM CAPTURE: Decimation for oscilloscope display ===
+                    // Capture every Nth sample (N=DECIMATION_FACTOR, varies with TIME_WINDOW)
+                    if self.waveform_capture.decimation_counter % WAVEFORM_DECIMATION_FACTOR == 0 {
+                        // Write to circular buffer (1024 samples)
+                        self.waveform_capture.buffer[self.waveform_capture.write_index] = output;
+                        self.waveform_capture.write_index += 1;
+
+                        // Send at display refresh rate to keep write_index fresh (avoids freezing)
+                        // SEND_INTERVAL derived from: decimated_rate / display_rate ≈ 882 Hz / 120 Hz = 7 samples
+                        if self.waveform_capture.write_index % WAVEFORM_SEND_INTERVAL == 0 {
+                            let data = WaveformData {
+                                samples: self.waveform_capture.buffer,
+                                write_index: self.waveform_capture.write_index,
+                            };
+                            // enqueue() returns Err if full - we drop old data (oscilloscope behavior)
+                            self.waveform_producer.enqueue(data).ok();
+                        }
+
+                        // Wrap around at buffer size (circular buffer)
+                        if self.waveform_capture.write_index >= WAVEFORM_BUFFER_SIZE {
+                            self.waveform_capture.write_index = 0;
+                        }
+                    }
+                    self.waveform_capture.decimation_counter += 1;
                 }
 
                 let bytes_written = buffer.len() - (buffer.len() % 4);
