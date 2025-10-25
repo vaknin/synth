@@ -235,9 +235,7 @@ pub const DISPLAY_WIDTH: u32 = 128;
 pub const DISPLAY_HEIGHT: u32 = 128;
 
 /// Display refresh rate: 30Hz (39% util), 60Hz (78% util), 120Hz (high).
-pub const DISPLAY_REFRESH_RATE_HZ: u32 = 120;
-
-pub const DISPLAY_REFRESH_INTERVAL_MS: u64 = 1000 / DISPLAY_REFRESH_RATE_HZ as u64;
+pub const DISPLAY_REFRESH_RATE_HZ: u32 = 60;
 
 /// SPI clock: 20 MHz max (SSD1351 datasheet limit).
 pub const DISPLAY_SPI_FREQUENCY_HZ: u32 = 20_000_000;
@@ -282,9 +280,11 @@ pub const WAVEFORM_SAFE_DISTANCE: usize = {
     window_samples + 32
 };
 
-/// Waveform send interval: send data every N decimated samples to match display refresh rate.
-/// Ensures write_index stays fresh while avoiding queue overflow.
-/// Derived from: floor(decimated_rate / display_rate) = floor(882 Hz / 120 Hz) = 7 samples.
-/// Send rate: (SAMPLE_RATE / DECIMATION_FACTOR) / SEND_INTERVAL ≈ 126 Hz (slightly ahead of 120 Hz).
-pub const WAVEFORM_SEND_INTERVAL: usize =
-    ((SAMPLE_RATE / WAVEFORM_DECIMATION_FACTOR) / DISPLAY_REFRESH_RATE_HZ) as usize;
+/// Fixed-point (16.16 format) samples per display frame.
+/// At 120 Hz: 882 Hz / 120 Hz = 7.35 samples/frame → 481,689 in 16.16 fixed-point.
+/// Used by accumulator to send waveform data at exactly display refresh rate.
+/// Automatically adapts when DISPLAY_REFRESH_RATE_HZ changes (30/60/120 Hz).
+pub const WAVEFORM_SAMPLES_PER_FRAME_FIXED: u32 = (((SAMPLE_RATE / WAVEFORM_DECIMATION_FACTOR)
+    as f32
+    / DISPLAY_REFRESH_RATE_HZ as f32)
+    * 65536.0) as u32;

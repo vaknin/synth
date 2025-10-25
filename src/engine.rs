@@ -1,7 +1,7 @@
 //! Engine module: manages oscillators, processes messages, renders audio.
 
 use crate::config::{
-    MASTER_GAIN, WAVEFORM_BUFFER_SIZE, WAVEFORM_DECIMATION_FACTOR, WAVEFORM_SEND_INTERVAL,
+    MASTER_GAIN, WAVEFORM_BUFFER_SIZE, WAVEFORM_DECIMATION_FACTOR, WAVEFORM_SAMPLES_PER_FRAME_FIXED,
 };
 use crate::filter::MoogLadderFilter;
 use crate::lfo::LFO;
@@ -13,16 +13,19 @@ use crate::{AudioStream, ChannelReceiver, WaveformProducer, I16_MAX_F32};
 /// Waveform capture state for oscilloscope visualization.
 ///
 /// Captures every Nth audio sample (decimation) for display on OLED.
-/// When buffer is full, sends to display task via SPSC queue.
+/// Sends to display at exact refresh rate using fixed-point accumulator.
 struct WaveformCapture {
-    /// Sample buffer (128 i16 samples = 256 bytes)
+    /// Sample buffer (1024 i16 samples)
     buffer: [i16; WAVEFORM_BUFFER_SIZE],
 
     /// Decimation counter (capture every WAVEFORM_DECIMATION_FACTOR samples)
     decimation_counter: u32,
 
-    /// Current write position in buffer (0-127)
+    /// Current write position in buffer (0-1023)
     write_index: usize,
+
+    /// Fixed-point accumulator (16.16) for rate-matched sending
+    send_accumulator: u32,
 }
 
 impl WaveformCapture {
@@ -31,6 +34,7 @@ impl WaveformCapture {
             buffer: [0; WAVEFORM_BUFFER_SIZE],
             decimation_counter: 0,
             write_index: 0,
+            send_accumulator: 0,
         }
     }
 }
@@ -133,13 +137,16 @@ impl Engine {
     #[inline]
     fn consume_messages(&mut self) {
         while let Ok(msg) = self.consumer.try_receive() {
+            log::warn!("📥 Engine received: {:?}", msg);
             match msg {
                 Message::SetCutoff(freq) => {
                     self.base_cutoff = freq;
+                    log::warn!("  ✅ Set cutoff to {:.1} Hz", freq);
                 }
 
                 Message::SetResonance(q) => {
                     self.filter.set_resonance(q);
+                    log::warn!("  ✅ Set resonance to {:.2}", q);
                 }
             }
         }
@@ -225,14 +232,20 @@ impl Engine {
                         self.waveform_capture.buffer[self.waveform_capture.write_index] = output;
                         self.waveform_capture.write_index += 1;
 
-                        // Send at display refresh rate to keep write_index fresh (avoids freezing)
-                        // SEND_INTERVAL derived from: decimated_rate / display_rate ≈ 882 Hz / 120 Hz = 7 samples
-                        if self.waveform_capture.write_index % WAVEFORM_SEND_INTERVAL == 0 {
+                        // Accumulator-based send: match display refresh rate exactly (prevents queue overflow)
+                        // Add 1.0 sample in 16.16 fixed-point format
+                        self.waveform_capture.send_accumulator += 1 << 16;
+
+                        // Send when we've accumulated enough samples for one display frame
+                        // At 120 Hz: 7.35 samples/frame → sends exactly 120 times/second
+                        if self.waveform_capture.send_accumulator >= WAVEFORM_SAMPLES_PER_FRAME_FIXED {
+                            self.waveform_capture.send_accumulator -= WAVEFORM_SAMPLES_PER_FRAME_FIXED;
+
                             let data = WaveformData {
                                 samples: self.waveform_capture.buffer,
                                 write_index: self.waveform_capture.write_index,
                             };
-                            // enqueue() returns Err if full - we drop old data (oscilloscope behavior)
+                            // enqueue() returns Err if full - should never happen with rate-matched sending
                             self.waveform_producer.enqueue(data).ok();
                         }
 

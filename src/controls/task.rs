@@ -26,7 +26,14 @@ pub async fn pot_task(sender: CtrlSender, mut adc_bus: AdcBus, mut pins: [AnyAdc
         Potentiometer::new(map_resonance), // GPIO2
     ];
 
+    let mut poll_count: u32 = 0;
+
     loop {
+        poll_count += 1;
+        if poll_count % 25 == 0 {
+            log::warn!("🎛️ Pot task running: poll #{}", poll_count);
+        }
+
         // Poll each pot sequentially
         // Note: This task runs on Core 1 (isolated from audio on Core 0)
         // Blocking ADC reads here don't affect audio streaming on the other core

@@ -29,6 +29,7 @@ type I2sDoutGpio = esp_hal::peripherals::GPIO36<'static>;
 
 // SPI Display peripheral type aliases (SSD1351 OLED)
 type Spi2Peripheral = esp_hal::peripherals::SPI2<'static>;
+type DmaChannel1 = esp_hal::peripherals::DMA_CH1<'static>;
 type SpiDcGpio = esp_hal::peripherals::GPIO9<'static>; // DC (data/command select)
 type SpiCsGpio = esp_hal::peripherals::GPIO10<'static>; // CS (chip select)
 type SpiMosiGpio = esp_hal::peripherals::GPIO11<'static>; // MOSI (DIN on display)

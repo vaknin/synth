@@ -15,15 +15,16 @@ Audio synthesizer with oscillators, filters, LFOs, and real-time OLED waveform v
   - Embassy Channel (MPSC): Pot messages (Core 1 → Core 0)
   - heapless::spsc::Queue: Waveform data (Core 0 → Core 1)
   - Pattern: Message-passing over shared mutable state
+  - Rate matching: Use 16.16 fixed-point accumulators to match producer/consumer rates exactly (prevents queue overflow, ensures smooth operation)
 
 **GPIO (Phase 1):**
 - I2S: GPIO35/36/37 (safe on N16R8)
 - Pots: GPIO1 (cutoff), GPIO2 (resonance)
 - Display: GPIO9-13 (SPI2, 20 MHz, SSD1351 128×128 OLED)
-  - Time-based scrolling: constant velocity matching decimated sample rate
+  - Smooth scrolling: linear interpolation between adjacent samples using fractional scroll position
+  - Waveform send rate: 16.16 accumulator matches display refresh rate exactly (no queue overflow)
   - Scroll rate auto-derived from DISPLAY_REFRESH_RATE_HZ (configurable: 30/60/120Hz)
   - Zoom (TIME_WINDOW_MS) independent of refresh rate
-  - Initialize scroll at half-buffer (512 samples) for safe separation
 
 # Project Guidelines
 

@@ -1,14 +1,14 @@
 //! Display refresh task (Core 1).
 
 use super::DisplayDriver;
-use crate::config::DISPLAY_REFRESH_INTERVAL_MS;
+use crate::config::DISPLAY_REFRESH_RATE_HZ;
 use crate::WaveformConsumer;
-use embassy_time::{Duration, Timer};
+use embassy_time::{Duration, Ticker};
 
-/// OLED refresh task: time-based scrolling with velocity correction.
+/// OLED refresh task: phase-locked scrolling with drift-free timing.
 #[embassy_executor::task]
 pub async fn display_task(mut display: DisplayDriver, mut waveform_consumer: WaveformConsumer) {
-    let frame_duration = Duration::from_millis(DISPLAY_REFRESH_INTERVAL_MS);
+    let mut ticker = Ticker::every(Duration::from_hz(DISPLAY_REFRESH_RATE_HZ as u64));
 
     loop {
         // Update cached waveform data if available
@@ -19,7 +19,7 @@ pub async fn display_task(mut display: DisplayDriver, mut waveform_consumer: Wav
         // ALWAYS draw (time-based scrolling, independent of data arrival)
         display.draw_waveform();
 
-        // Wait for next frame
-        Timer::after(frame_duration).await;
+        // Wait for next tick (phase-locked, compensates for processing time)
+        ticker.next().await;
     }
 }
