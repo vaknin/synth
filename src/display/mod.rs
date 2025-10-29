@@ -45,13 +45,19 @@ impl DisplayDriver {
         dc: Output<'static>,
         mut rst: Output<'static>,
     ) -> Self {
+        log::info!("DisplayDriver::new() - step 1: converting SPI to async...");
         // Convert to Async mode on THIS core (Core 1) - registers interrupt handler here
         let spi_async = spi.into_async();
+        log::info!("DisplayDriver::new() - step 2: SPI async conversion complete");
 
+        log::info!("DisplayDriver::new() - step 3: initializing framebuffer...");
         let framebuffer = FRAMEBUFFER.init([0u8; FRAMEBUFFER_SIZE]);
+        log::info!("DisplayDriver::new() - step 4: creating SPI device...");
         let spi_device = ExclusiveDevice::new(spi_async, cs, Delay).expect("Failed to create SPI device");
+        log::info!("DisplayDriver::new() - step 5: creating SPI interface...");
         let interface = SPIInterface::new(spi_device, dc);
 
+        log::info!("DisplayDriver::new() - step 6: creating DisplayAsync...");
         // Create async display instance
         let display_async = DisplayAsync::new(
             interface,
@@ -59,11 +65,54 @@ impl DisplayDriver {
             DisplayRotation::Rotate0,
         );
 
+        log::info!("DisplayDriver::new() - step 7: creating GraphicsModeAsync...");
         let mut display = GraphicsModeAsync::new(display_async, framebuffer);
+        log::info!("DisplayDriver::new() - step 8: display objects created");
 
         // Reset and initialize (async)
-        display.reset(&mut rst, &mut Delay).ok();
-        display.init().await.ok();
+        log::info!("Resetting display...");
+        match display.reset(&mut rst, &mut Delay) {
+            Ok(_) => log::info!("Display reset OK"),
+            Err(e) => log::error!("Display reset failed: {:?}", e),
+        }
+
+        log::info!("Initializing display...");
+        match display.init().await {
+            Ok(_) => log::info!("Display init OK"),
+            Err(e) => log::error!("Display init failed: {:?}", e),
+        }
+
+        display.clear();
+        log::info!("Display cleared");
+
+        // Draw test pattern to verify display works
+        log::info!("Drawing test pattern...");
+        use embedded_graphics::primitives::{Rectangle, PrimitiveStyleBuilder};
+
+        // Draw border
+        Rectangle::new(Point::new(0, 0), Size::new(DISPLAY_WIDTH, DISPLAY_HEIGHT))
+            .into_styled(PrimitiveStyleBuilder::new()
+                .stroke_color(Rgb565::RED)
+                .stroke_width(2)
+                .build())
+            .draw(&mut display)
+            .ok();
+
+        // Draw X pattern
+        Line::new(Point::new(0, 0), Point::new(127, 127))
+            .into_styled(PrimitiveStyle::with_stroke(Rgb565::GREEN, 2))
+            .draw(&mut display)
+            .ok();
+        Line::new(Point::new(127, 0), Point::new(0, 127))
+            .into_styled(PrimitiveStyle::with_stroke(Rgb565::BLUE, 2))
+            .draw(&mut display)
+            .ok();
+
+        log::info!("Flushing test pattern...");
+        display.flush().await;
+        log::info!("Test pattern displayed - display hardware verified!");
+
+        // Clear for waveform rendering
         display.clear();
 
         Self {

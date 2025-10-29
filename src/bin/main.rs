@@ -30,8 +30,8 @@ static APP_CORE_STACK: StaticCell<Stack<APP_CORE_STACK_SIZE>> = StaticCell::new(
 
 #[esp_rtos::main]
 async fn main(_spawner: Spawner) {
-    // Initialize logger
-    esp_println::logger::init_logger_from_env();
+    // Initialize logger with Info level for development
+    esp_println::logger::init_logger(log::LevelFilter::Info);
 
     let peripherals = esp_hal::init(esp_hal::Config::default());
 
@@ -78,6 +78,18 @@ async fn main(_spawner: Spawner) {
     // NOTE: Do NOT create DisplayDriver here - it must be created on Core 1
     // to register interrupt handlers on the correct core
 
+    // Initialize I2S audio hardware BEFORE starting Core 1 (prevents lock reentrancy panic)
+    // I2S on GPIO35/36/37 to avoid conflicts with ADC, I2C, SPI
+    let mut audio_stream: AudioStream = hardware::setup_audio(
+        peripherals.I2S0,
+        dma_channel,
+        peripherals.GPIO35,
+        peripherals.GPIO36,
+        peripherals.GPIO37,
+        tx_buffer,
+        tx_descriptors,
+    );
+
     // Initialize Core 1 stack (must happen after esp_rtos::start)
     let app_core_stack = APP_CORE_STACK.init(Stack::new());
 
@@ -116,18 +128,7 @@ async fn main(_spawner: Spawner) {
         },
     );
 
-    // Core 0 (PRO_CPU) continues here - initialize audio hardware
-    // I2S on GPIO35/36/37 to avoid conflicts with ADC, I2C, SPI
-    let mut audio_stream: AudioStream = hardware::setup_audio(
-        peripherals.I2S0,
-        dma_channel,
-        peripherals.GPIO35,
-        peripherals.GPIO36,
-        peripherals.GPIO37,
-        tx_buffer,
-        tx_descriptors,
-    );
-
+    // Core 0 (PRO_CPU) continues here - audio hardware already initialized
     // Create synth engine on Core 0
     let mut engine = Engine::new(consumer, waveform_producer);
 

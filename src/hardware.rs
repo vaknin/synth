@@ -141,7 +141,8 @@ pub fn setup_spi_display(
     use esp_hal::time::Rate;
 
     // Create DMA buffers (33KB for display framebuffer: 128×128×2 = 32768 bytes)
-    let (rx_buffer, rx_descriptors, tx_buffer, tx_descriptors) = dma_buffers!(33000);
+    // 10 descriptors: Each descriptor handles max 4092 bytes, 32768/4092 ≈ 8 needed
+    let (rx_buffer, rx_descriptors, tx_buffer, tx_descriptors) = dma_buffers!(33000, 10);
 
     let dma_rx_buf = DmaRxBuf::new(rx_descriptors, rx_buffer).expect("Failed to create RX DMA buffer");
     let dma_tx_buf = DmaTxBuf::new(tx_descriptors, tx_buffer).expect("Failed to create TX DMA buffer");

@@ -4,12 +4,12 @@
 // === System Architecture ===
 
 /// Stack size for Core 1 (APP_CPU) - Embassy executor + ADC polling + display rendering.
-/// 12KB accounts for:
+/// 40KB accounts for:
 /// - Embassy executor overhead (~1-2KB)
+/// - DisplayDriver initialization: temporary 32KB framebuffer array during FRAMEBUFFER.init()
 /// - DisplayDriver with cached WaveformData (~2KB)
-/// - pot_task with 2 Potentiometer structs
 /// - display_task: embedded-graphics creates 127 temporary Line objects per frame
-pub const APP_CORE_STACK_SIZE: usize = 12288;
+pub const APP_CORE_STACK_SIZE: usize = 40960;
 
 // === Synth Engine ===
 
@@ -257,7 +257,8 @@ pub const WAVEFORM_DECIMATION_FACTOR: u32 = {
 };
 
 /// SPSC queue capacity (power-of-2 for optimal heapless performance).
-pub const WAVEFORM_QUEUE_CAPACITY: usize = 2;
+/// Increased to 8 for debugging (was 2)
+pub const WAVEFORM_QUEUE_CAPACITY: usize = 8;
 
 /// Samples per pixel (uses decimated rate, not raw 44.1kHz).
 /// Derived from TIME_WINDOW_MS, independent of refresh rate.

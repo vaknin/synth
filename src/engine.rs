@@ -239,7 +239,17 @@ impl Engine {
                                 write_index: self.waveform_capture.write_index,
                             };
                             // enqueue() returns Err if full - should never happen with rate-matched sending
-                            self.waveform_producer.enqueue(data).ok();
+                            match self.waveform_producer.enqueue(data) {
+                                Ok(_) => {
+                                    #[cfg(feature = "profile")]
+                                    if self.profile_stats.buffer_count % 172 == 0 {
+                                        log::info!("Waveform sent: write_index={}", self.waveform_capture.write_index);
+                                    }
+                                }
+                                Err(_) => {
+                                    log::warn!("Waveform queue full!");
+                                }
+                            }
                         }
 
                         // Wrap around at buffer size (circular buffer)
