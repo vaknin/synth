@@ -3,7 +3,8 @@
 use crate::{config::SAMPLE_RATE, AudioStream};
 use esp_hal::{
     analog::adc::{Adc, AdcCalCurve, AdcPin},
-    dma::DmaDescriptor,
+    dma::{DmaDescriptor, DmaRxBuf, DmaTxBuf},
+    dma_buffers,
     i2s::master::{DataFormat, I2s},
     interrupt::software::{SoftwareInterrupt, SoftwareInterruptControl},
     peripherals::{self, ADC1, SW_INTERRUPT},
@@ -123,13 +124,14 @@ pub fn setup_audio(
 /// Tuple of (SPI bus, CS pin, DC pin, RST pin) ready for SSD1351 driver initialization
 pub fn setup_spi_display(
     spi2: Spi2Peripheral,
+    dma_channel: DmaChannel1,
     dc_gpio: SpiDcGpio,
     cs_gpio: SpiCsGpio,
     mosi_gpio: SpiMosiGpio,
     sck_gpio: SpiSckGpio,
     rst_gpio: SpiRstGpio,
 ) -> (
-    esp_hal::spi::master::Spi<'static, esp_hal::Blocking>,
+    esp_hal::spi::master::SpiDmaBus<'static, esp_hal::Blocking>,
     esp_hal::gpio::Output<'static>,
     esp_hal::gpio::Output<'static>,
     esp_hal::gpio::Output<'static>,
@@ -138,21 +140,31 @@ pub fn setup_spi_display(
     use esp_hal::spi::master::{Config, Spi};
     use esp_hal::time::Rate;
 
-    // Configure SPI bus at 10 MHz
-    let spi = Spi::new(
+    // Create DMA buffers (33KB for display framebuffer: 128×128×2 = 32768 bytes)
+    let (rx_buffer, rx_descriptors, tx_buffer, tx_descriptors) = dma_buffers!(33000);
+
+    let dma_rx_buf = DmaRxBuf::new(rx_descriptors, rx_buffer).expect("Failed to create RX DMA buffer");
+    let dma_tx_buf = DmaTxBuf::new(tx_descriptors, tx_buffer).expect("Failed to create TX DMA buffer");
+
+    // Configure SPI with DMA (in Blocking mode for cross-core transfer)
+    // Will be converted to Async on Core 1 to register interrupt handler correctly
+    let spi_bus = Spi::new(
         spi2,
         Config::default().with_frequency(Rate::from_hz(crate::config::DISPLAY_SPI_FREQUENCY_HZ)),
     )
     .expect("Failed to create SPI")
     .with_sck(sck_gpio)
-    .with_mosi(mosi_gpio);
+    .with_mosi(mosi_gpio)
+    .with_dma(dma_channel)
+    .with_buffers(dma_rx_buf, dma_tx_buf);
+    // NOTE: Do NOT call .into_async() here - peripheral must be Send to move to Core 1
 
     // Configure control pins as outputs
     let cs = Output::new(cs_gpio, Level::High, OutputConfig::default()); // CS idle high
     let dc = Output::new(dc_gpio, Level::Low, OutputConfig::default()); // DC default low (command mode)
     let rst = Output::new(rst_gpio, Level::High, OutputConfig::default()); // RST idle high (not in reset)
 
-    (spi, cs, dc, rst)
+    (spi_bus, cs, dc, rst)
 }
 
 /// Initialize software interrupts for dual-core esp-rtos.

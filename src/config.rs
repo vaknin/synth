@@ -235,7 +235,7 @@ pub const DISPLAY_WIDTH: u32 = 128;
 pub const DISPLAY_HEIGHT: u32 = 128;
 
 /// Display refresh rate: 30Hz (39% util), 60Hz (78% util), 120Hz (high).
-pub const DISPLAY_REFRESH_RATE_HZ: u32 = 60;
+pub const DISPLAY_REFRESH_RATE_HZ: u32 = 30;
 
 /// SPI clock: 20 MHz max (SSD1351 datasheet limit).
 pub const DISPLAY_SPI_FREQUENCY_HZ: u32 = 20_000_000;
@@ -247,7 +247,7 @@ pub const WAVEFORM_BUFFER_SIZE: usize = (DISPLAY_WIDTH as usize) * 8;
 
 /// Oscilloscope zoom (time/div): 20ms (tight), 50ms (balanced), 100ms (wide), 200ms+ (zoomed out).
 /// Smaller = waveform appears wider/slower. Independent of refresh rate.
-pub const WAVEFORM_TIME_WINDOW_MS: u32 = 20;
+pub const WAVEFORM_TIME_WINDOW_MS: u32 = 200;
 
 /// Decimation factor: fixed rate ensuring >= 1 sample/pixel at TIME_WINDOW.
 /// Independent of refresh rate for consistent zoom across all configurations.

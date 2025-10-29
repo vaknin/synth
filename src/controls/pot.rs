@@ -168,7 +168,6 @@ impl Potentiometer {
         if (normalized - self.last_sent).abs() >= POT_CHANGE_THRESHOLD {
             self.last_sent = normalized;
             let msg = (self.map_fn)(normalized);
-            log::warn!("📤 Pot sending: normalized={:.3}, msg={:?}", normalized, msg);
             if let Err(e) = sender.try_send(msg) {
                 warn!("Pot message dropped (queue full): {:?}", e);
             }

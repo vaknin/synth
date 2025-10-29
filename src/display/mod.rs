@@ -13,47 +13,58 @@ use embedded_graphics::{
     prelude::*,
     primitives::{Line, PrimitiveStyle},
 };
+use embassy_time::Delay;
 use embedded_hal_bus::spi::ExclusiveDevice;
-use esp_hal::{delay::Delay, gpio::Output, spi::master::Spi};
+use esp_hal::{gpio::Output, spi::master::SpiDmaBus};
 use ssd1351::{
-    builder::Builder,
-    mode::GraphicsMode,
+    display_async::DisplayAsync,
+    mode::GraphicsModeAsync,
     properties::{DisplayRotation, DisplaySize},
 };
 use static_cell::StaticCell;
 
 const FRAMEBUFFER_SIZE: usize = (DISPLAY_WIDTH * DISPLAY_HEIGHT * 2) as usize;
 static FRAMEBUFFER: StaticCell<[u8; FRAMEBUFFER_SIZE]> = StaticCell::new();
-type SpiDevice = ExclusiveDevice<Spi<'static, esp_hal::Blocking>, Output<'static>, Delay>;
+type SpiDevice = ExclusiveDevice<SpiDmaBus<'static, esp_hal::Async>, Output<'static>, Delay>;
 
-/// SSD1351 OLED driver with oscilloscope rendering.
+/// SSD1351 OLED driver with oscilloscope rendering (async SPI with DMA).
 pub struct DisplayDriver {
-    display: GraphicsMode<SPIInterface<SpiDevice, Output<'static>>>,
+    display: GraphicsModeAsync<SPIInterface<SpiDevice, Output<'static>>>,
     scroll_position_samples: f32,
     pub cached_waveform: WaveformData,
 }
 
 impl DisplayDriver {
-    pub fn new(
-        spi: Spi<'static, esp_hal::Blocking>,
+    /// Initialize async display driver (converts SPI to async on THIS core, yields during init)
+    ///
+    /// IMPORTANT: Accepts SPI in Blocking mode and converts to Async internally.
+    /// This ensures interrupt handlers are registered on the correct core (Core 1).
+    pub async fn new(
+        spi: SpiDmaBus<'static, esp_hal::Blocking>,
         cs: Output<'static>,
         dc: Output<'static>,
         mut rst: Output<'static>,
     ) -> Self {
+        // Convert to Async mode on THIS core (Core 1) - registers interrupt handler here
+        let spi_async = spi.into_async();
+
         let framebuffer = FRAMEBUFFER.init([0u8; FRAMEBUFFER_SIZE]);
-        let spi_device =
-            ExclusiveDevice::new(spi, cs, Delay::new()).expect("Failed to create SPI device");
+        let spi_device = ExclusiveDevice::new(spi_async, cs, Delay).expect("Failed to create SPI device");
         let interface = SPIInterface::new(spi_device, dc);
 
-        let mut display: GraphicsMode<_> = Builder::new()
-            .with_rotation(DisplayRotation::Rotate0)
-            .with_size(DisplaySize::Display128x128)
-            .connect_interface(interface, framebuffer)
-            .into();
+        // Create async display instance
+        let display_async = DisplayAsync::new(
+            interface,
+            DisplaySize::Display128x128,
+            DisplayRotation::Rotate0,
+        );
 
-        display.reset(&mut rst, &mut Delay::new()).ok();
-        display.init().ok();
-        display.clear(true);
+        let mut display = GraphicsModeAsync::new(display_async, framebuffer);
+
+        // Reset and initialize (async)
+        display.reset(&mut rst, &mut Delay).ok();
+        display.init().await.ok();
+        display.clear();
 
         Self {
             display,
@@ -65,10 +76,12 @@ impl DisplayDriver {
         }
     }
 
-    /// Oscilloscope rendering: average mode with connected lines.
+    /// Oscilloscope rendering: average mode with connected lines (async).
     ///
-    /// Performance: ~13ms per frame (SPI flush dominates, drawing is <10µs).
-    pub fn draw_waveform(&mut self) {
+    /// Performance: Drawing to RAM ~10µs (sync), flush via DMA 13.1ms (async, yields CPU).
+    pub async fn draw_waveform(&mut self) {
+        static mut FRAME_COUNT: u32 = 0;
+
         // Time-based scrolling: constant velocity matching production rate
         self.scroll_position_samples += WAVEFORM_SCROLL_RATE;
 
@@ -88,11 +101,24 @@ impl DisplayDriver {
             WAVEFORM_BUFFER_SIZE - scroll_pos_int + self.cached_waveform.write_index
         };
 
+        unsafe {
+            FRAME_COUNT += 1;
+            if FRAME_COUNT % 60 == 0 {
+                log::info!("draw_waveform: scroll_pos={}, write_idx={}, distance={}, safe_dist={}",
+                    scroll_pos_int, self.cached_waveform.write_index, distance, WAVEFORM_SAFE_DISTANCE);
+            }
+        }
+
         if distance < WAVEFORM_SAFE_DISTANCE {
+            unsafe {
+                if FRAME_COUNT % 60 == 0 {
+                    log::warn!("Skipping frame: insufficient data (distance={} < safe={})", distance, WAVEFORM_SAFE_DISTANCE);
+                }
+            }
             return;
         }
 
-        self.display.clear(false);
+        self.display.clear();
 
         let center_y = (DISPLAY_HEIGHT / 2) as i32;
         let scale = 64.0 / i16::MAX as f32;
@@ -161,6 +187,7 @@ impl DisplayDriver {
             }
         }
 
-        self.display.flush();
+        // Async flush: DMA transfer yields CPU for 13.1ms, pot task runs concurrently!
+        self.display.flush().await;
     }
 }

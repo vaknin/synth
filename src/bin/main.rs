@@ -47,7 +47,7 @@ async fn main(_spawner: Spawner) {
 
     // MPSC Channel (thread-safe across cores)
     let consumer = CHANNEL.receiver();
-    let producer = CHANNEL.sender();
+    let _producer = CHANNEL.sender(); // Unused (pot task disabled)
 
     // SPSC Queue for waveform data (Core 0 → Core 1)
     let waveform_queue = WAVEFORM_QUEUE.init(WaveformQueue::new());
@@ -57,25 +57,26 @@ async fn main(_spawner: Spawner) {
     #[allow(clippy::manual_div_ceil)]
     let (_, _, tx_buffer, tx_descriptors) = dma_circular_buffers!(0, DMA_BUFFER_SIZE);
 
-    // Initialize ADC hardware for 2 pots (will be moved to Core 1)
-    let (adc_bus, pins) = hardware::setup_adc(
+    // Initialize ADC hardware for 2 pots (unused - pot task disabled)
+    let (_adc_bus, _pins) = hardware::setup_adc(
         peripherals.ADC1,
         peripherals.GPIO1, // Pot 0: Filter Cutoff
         peripherals.GPIO2, // Pot 1: Filter Resonance
     );
 
-    // Initialize SPI display hardware (will be moved to Core 1)
+    // Initialize SPI display hardware with DMA (in Blocking mode for cross-core transfer)
     let (spi, cs, dc, rst) = hardware::setup_spi_display(
         peripherals.SPI2,
-        peripherals.GPIO9,  // DC
-        peripherals.GPIO10, // CS
-        peripherals.GPIO11, // MOSI
-        peripherals.GPIO12, // SCK
-        peripherals.GPIO13, // RST
+        peripherals.DMA_CH1, // DMA channel for async SPI (DMA_CH0 used by audio)
+        peripherals.GPIO9,   // DC
+        peripherals.GPIO10,  // CS
+        peripherals.GPIO11,  // MOSI
+        peripherals.GPIO12,  // SCK
+        peripherals.GPIO13,  // RST
     );
 
-    // Create display driver
-    let display = synth::display::DisplayDriver::new(spi, cs, dc, rst);
+    // NOTE: Do NOT create DisplayDriver here - it must be created on Core 1
+    // to register interrupt handlers on the correct core
 
     // Initialize Core 1 stack (must happen after esp_rtos::start)
     let app_core_stack = APP_CORE_STACK.init(Stack::new());
@@ -95,15 +96,19 @@ async fn main(_spawner: Spawner) {
 
             let executor = EXECUTOR.init(Executor::new());
             executor.run(|spawner| {
-                // Spawn pot task on Core 1
-                spawner
-                    .spawn(synth::controls::pot_task(producer, adc_bus, pins))
-                    .ok();
+                // DISABLED: Pot task (focusing on display only)
+                // spawner
+                //     .spawn(synth::controls::pot_task(producer, adc_bus, pins))
+                //     .ok();
 
-                // Spawn display task on Core 1 (runs alongside pot polling)
+                // Spawn display task on Core 1 (runs standalone)
+                // Pass Blocking SPI - will be converted to Async on Core 1
                 spawner
                     .spawn(synth::display::task::display_task(
-                        display,
+                        spi,
+                        cs,
+                        dc,
+                        rst,
                         waveform_consumer,
                     ))
                     .ok();

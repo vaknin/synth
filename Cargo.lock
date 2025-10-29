@@ -423,6 +423,7 @@ checksum = "513e0b3a8fb7d3013a8ae17a834283f170deaf7d0eeab0a7c1a36ad4dd356d22"
 dependencies = [
  "critical-section",
  "embedded-hal 1.0.0",
+ "embedded-hal-async",
 ]
 
 [[package]]
@@ -1257,8 +1258,6 @@ checksum = "a0f368519fc6c85fc1afdb769fb5a51123f6158013e143656e25a3485a0d401c"
 [[package]]
 name = "ssd1351"
 version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "21c426aced0940ed7c25b8134d6a0bf9745ade9f788ca54bec14c99e67120d6a"
 dependencies = [
  "display-interface",
  "display-interface-spi",

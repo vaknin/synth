@@ -41,7 +41,7 @@ impl WaveformCapture {
 
 /// Main synth engine - simplified drone synth with single oscillator.
 pub struct Engine {
-    /// Single sine oscillator at 110Hz (A2 drone, always on)
+    /// Single sine oscillator at 220Hz (A3, always on)
     oscillator: Oscillator,
 
     /// Message receiver from control tasks
@@ -92,9 +92,9 @@ impl Engine {
     /// # Returns
     /// Engine with single sine oscillator at 110Hz (A2), always on at full level.
     pub fn new(receiver: ChannelReceiver, waveform_producer: WaveformProducer) -> Self {
-        // Single sine oscillator configured as drone (110Hz A2, full level)
+        // Single sine oscillator configured as drone (220Hz A3, full level)
         let mut oscillator = Oscillator::new(Waveform::Sine);
-        oscillator.set_frequency(110.0); // A2 note
+        oscillator.set_frequency(220.0); // A3 note (220Hz)
         oscillator.set_level(1.0); // Always on, full volume
 
         Self {
@@ -137,16 +137,13 @@ impl Engine {
     #[inline]
     fn consume_messages(&mut self) {
         while let Ok(msg) = self.consumer.try_receive() {
-            log::warn!("📥 Engine received: {:?}", msg);
             match msg {
                 Message::SetCutoff(freq) => {
                     self.base_cutoff = freq;
-                    log::warn!("  ✅ Set cutoff to {:.1} Hz", freq);
                 }
 
                 Message::SetResonance(q) => {
                     self.filter.set_resonance(q);
-                    log::warn!("  ✅ Set resonance to {:.2}", q);
                 }
             }
         }
@@ -171,18 +168,14 @@ impl Engine {
     /// AUDIO RATE (44,100 Hz): Render one audio sample - SUPER HOT PATH!
     ///
     /// Simplified for single drone oscillator:
-    /// - Single oscillator tick() (no mixing, no normalization)
-    /// - Filter processing with cached coefficients
+    /// - Single oscillator tick() (no mixing, no normalization, no filtering)
     ///
     /// # Returns
-    /// Filtered mono sample (before master gain and soft-start)
+    /// Raw mono sample (before master gain and soft-start)
     #[inline]
     fn render_sample(&mut self) -> f32 {
-        // Single oscillator tick (110Hz A2 drone at full level)
-        let sample = self.oscillator.tick();
-
-        // Process through Moog Ladder Filter (lowpass only, cached coefficients)
-        self.filter.process(sample)
+        // Single oscillator tick (220Hz A3 drone at full level, no filter)
+        self.oscillator.tick()
     }
 
     /// Render audio samples into the DMA buffer.
