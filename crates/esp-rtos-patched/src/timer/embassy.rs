@@ -67,11 +67,6 @@ impl embassy_time_driver::Driver for TimerQueue {
         // Note that we don't put the thread to sleep here, as other embassy tasks may be
         // ready. The thread will go to sleep when it can.
 
-        // Break circular dependency: capture next_wakeup inside lock, pass as parameter
-        // to arm_next_wakeup() (which calls next_wakeup()) to avoid reentering this lock.
-        // Note: Small TOCTOU race where next_wakeup may become stale before arm_next_wakeup()
-        // is called. This is acceptable; the system tolerates waking slightly late as the
-        // timer is re-armed on every tick.
         let needs_rearm = self.inner.with(|inner| {
             let changed = inner.schedule_wake(at, waker);
             if changed {
@@ -81,7 +76,6 @@ impl embassy_time_driver::Driver for TimerQueue {
             }
         });
 
-        // Rearm outside the lock (lock released above)
         if let Some(embassy_next_wakeup) = needs_rearm {
             SCHEDULER.with(|scheduler| {
                 unwrap!(scheduler.time_driver.as_mut())

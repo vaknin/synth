@@ -157,9 +157,8 @@ impl TimeDriver {
     ///
     /// # Parameters
     /// - `now`: Current time in microseconds
-    /// - `embassy_next_wakeup`: Embassy's next wakeup time. Passed as parameter instead of
-    ///   calling `TIMER_QUEUE.next_wakeup()` to avoid circular lock dependency in
-    ///   `schedule_wake()`. Use `u64::MAX` when embassy feature is disabled.
+    /// - `embassy_next_wakeup`: Embassy's next wakeup time. Passed as parameter to avoid
+    ///   ABBA deadlock between SCHEDULER and TIMER_QUEUE locks in multicore scenarios.
     pub(crate) fn arm_next_wakeup(&mut self, now: u64, embassy_next_wakeup: u64) {
         let next_wakeup = self.timer_queue.next_wakeup(embassy_next_wakeup);
 
@@ -233,18 +232,8 @@ extern "C" fn timer_tick_handler() {
 
     trace!("Timer tick");
 
-    // Centralized 1-second heartbeat logging
-    static TICK_COUNTER: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
-    let ticks = TICK_COUNTER.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
-    if ticks % TICK_RATE == 0 {
-        let seconds = ticks / TICK_RATE;
-        info!("HEARTBEAT: {} seconds elapsed", seconds);
-    }
-
-    // ALTERNATIVE FIX: Don't call TIMER_QUEUE.next_wakeup() from interrupt at all.
-    // Problem: Any access to TIMER_QUEUE from interrupt context can race with Core 1.
-    // Solution: Use u64::MAX (ignore Embassy timers in interrupt), let schedule_wake() handle it.
-    // Embassy tasks will still wake via schedule_wake() calling arm_next_wakeup() directly.
+    // Avoid ABBA deadlock: Don't acquire TIMER_QUEUE lock from interrupt handler.
+    // Embassy timers are handled via schedule_wake() calling arm_next_wakeup() directly.
     let embassy_next_wakeup = u64::MAX;
 
     SCHEDULER.with_shared(|scheduler| {
@@ -309,7 +298,6 @@ extern "C" fn timer_tick_handler() {
         // ticking even if the interrupt doesn't trigger a context switch.
         // FIXME: this SHOULD be relatively cheap, but arming the timer involves u64 division.
         time_driver.current_alarm = u64::MAX;
-        // embassy_next_wakeup was captured BEFORE acquiring SCHEDULER lock (see above)
         time_driver.arm_next_wakeup(now, embassy_next_wakeup);
     });
 
