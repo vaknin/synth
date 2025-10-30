@@ -17,7 +17,7 @@ path = "./src/bin/main.rs"
 
 [dependencies]
 esp-bootloader-esp-idf = { version = "0.2.0", features = ["esp32s3"] }
-esp-hal = { version = "=1.0.0-rc.1", features = [
+esp-hal = { version = "=1.0.0", features = [
   "esp32s3",
   "log-04",
   "unstable",
@@ -28,13 +28,13 @@ critical-section = "1.2.0"
 embassy-executor = { version = "0.9.1", features = ["log"] }
 embassy-sync = { version = "0.7.2" }
 embassy-time = { version = "0.4.0", features = ["log"] }
-esp-backtrace = { version = "0.17.0", features = [
+esp-backtrace = { version = "0.18.1", features = [
   "esp32s3",
   "panic-handler",
   "println",
 ] }
-esp-rtos = { version = "0.1.0", features = ["esp32s3", "embassy", "log-04"] }
-esp-println = { version = "0.15.0", features = ["esp32s3", "log-04"] }
+esp-rtos = { version = "0.2.0", features = ["esp32s3", "embassy", "log-04"] }
+esp-println = { version = "0.16.1", features = ["esp32s3", "log-04"] }
 static_cell = "2.1.1"
 heapless = "0.9.1"
 micromath = { version = "2.1.0", default-features = false }
@@ -45,7 +45,7 @@ ssd1351 = { path = "crates/ssd1351-async", features = ["buffered"] }
 # BLOCKING ORIGINAL (ACTIVE - testing):
 # ssd1351 = { version = "0.5.0", features = ["buffered"] }
 embassy-embedded-hal = "0.5.0"  # Match esp-hal's version to avoid trait conflicts
-embedded-hal-bus = "0.2.0"  # For wrapping SpiBus as SpiDevice
+embedded-hal-bus = { version = "0.3", features = ["async"] }  # ExclusiveDevice for single-device SPI
 
 [features]
 profile = []

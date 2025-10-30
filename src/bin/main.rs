@@ -83,8 +83,8 @@ async fn main(_spawner: Spawner) {
 
     // ========== SIMPLE SPI TEST ON CORE 0 ==========
 
-    log::info!("Setting up SPI display (Core 0, blocking mode test)...");
-    let (mut spi, cs, dc, mut rst) = hardware::setup_spi_display(
+    log::info!("Setting up SPI display (Core 0)...");
+    let (spi, cs, dc, rst) = hardware::setup_spi_display(
         peripherals.SPI2,
         peripherals.DMA_CH1,
         peripherals.GPIO9,  // DC
@@ -95,114 +95,21 @@ async fn main(_spawner: Spawner) {
     );
     log::info!("SPI display peripherals configured");
 
-    // Test SPI in ASYNC mode on Core 0
-    log::info!("Testing SPI with async display init...");
-
-    use embassy_embedded_hal::shared_bus::asynch::spi::SpiDevice;
-    use embassy_sync::{blocking_mutex::raw::NoopRawMutex, mutex::Mutex};
-    use embassy_time::Delay;
-    use ssd1351::{
-        display_async::DisplayAsync,
-        mode::GraphicsModeAsync,
-        prelude::SPIInterface,
-        properties::{DisplayRotation, DisplaySize},
-    };
-    use static_cell::StaticCell;
-
-    // Allocate framebuffer
-    const FRAMEBUFFER_SIZE: usize = (128 * 128 * 2) as usize;
-    static FRAMEBUFFER: StaticCell<[u8; FRAMEBUFFER_SIZE]> = StaticCell::new();
-    let framebuffer = FRAMEBUFFER.init([0u8; FRAMEBUFFER_SIZE]);
-
-    log::info!("Converting SPI to async mode...");
-    let spi_async = spi.into_async();
-
-    log::info!("Wrapping SPI bus in Mutex for embassy SpiDevice...");
-    type SpiBusType = Mutex<NoopRawMutex, esp_hal::spi::master::SpiDmaBus<'static, esp_hal::Async>>;
-    static SPI_BUS: StaticCell<SpiBusType> = StaticCell::new();
-    let spi_bus = SPI_BUS.init(Mutex::new(spi_async));
-
-    log::info!("Creating embassy SpiDevice with CS pin...");
-    let spi_device = SpiDevice::new(spi_bus, cs);
-    let interface = SPIInterface::new(spi_device, dc);
-
-    log::info!("Creating DisplayAsync...");
-    let display_async = DisplayAsync::new(
-        interface,
-        DisplaySize::Display128x128,
-        DisplayRotation::Rotate0,
-    );
-
-    log::info!("Creating GraphicsModeAsync with buffer...");
-    let mut graphics = GraphicsModeAsync::new(display_async, framebuffer);
-
-    log::info!("Resetting display...");
-    if let Err(e) = graphics.reset(&mut rst, &mut Delay) {
-        log::error!("Display reset failed: {:?}", e);
-        panic!("Display reset failed");
-    }
-
-    log::info!("Initializing display (async)...");
-    if let Err(e) = graphics.init().await {
-        log::error!("Display init failed: {:?}", e);
-        panic!("Display init failed");
-    }
+    use synth::display::DisplayDriver;
+    log::info!("Initializing DisplayDriver...");
+    let mut display = DisplayDriver::new(spi, cs, dc, rst).await;
+    log::info!("DisplayDriver ready");
 
     log::info!("Starting animated test...");
-    use embassy_time::{Duration, Instant, Ticker};
-    use embedded_graphics::{
-        mono_font::{ascii::FONT_6X10, MonoTextStyle},
-        pixelcolor::Rgb565,
-        prelude::*,
-        primitives::{PrimitiveStyleBuilder, Rectangle},
-        text::Text,
-    };
+    use embassy_time::{Duration, Ticker};
 
-    let mut frame = 0u32;
-    let mut last_flush_ms = 0u64;
-    let mut ticker = Ticker::every(Duration::from_hz(DISPLAY_REFRESH_RATE_HZ.into())); // 30 FPS
+    let mut ticker = Ticker::every(Duration::from_hz(DISPLAY_REFRESH_RATE_HZ.into()));
 
-    log::info!("Entering animation loop (30 FPS)...");
+    log::info!("Entering animation loop ({}Hz)...", DISPLAY_REFRESH_RATE_HZ);
 
     loop {
         ticker.next().await;
-
-        // Clear screen
-        graphics.clear();
-
-        // Measure flush time
-        let flush_start = Instant::now();
-
-        // Draw moving rectangle (bounces left-right)
-        let x_pos = ((frame * 2) % 128) as i32;
-        Rectangle::new(Point::new(x_pos, 50), Size::new(20, 20))
-            .into_styled(
-                PrimitiveStyleBuilder::new()
-                    .fill_color(Rgb565::GREEN)
-                    .build(),
-            )
-            .draw(&mut graphics)
-            .ok();
-
-        // Draw flush time text at top
-        let text_style = MonoTextStyle::new(&FONT_6X10, Rgb565::WHITE);
-        let mut text_buffer = heapless::String::<32>::new();
-        use core::fmt::Write;
-        write!(&mut text_buffer, "{}ms", last_flush_ms).ok();
-        Text::new(&text_buffer, Point::new(2, 10), text_style)
-            .draw(&mut graphics)
-            .ok();
-
-        // Flush and measure
-        if let Err(e) = graphics.flush().await {
-            log::error!("Frame {}: Flush failed: {:?}", frame, e);
-            panic!("Flush failed");
-        }
-
-        let flush_duration = Instant::now() - flush_start;
-        last_flush_ms = flush_duration.as_millis();
-
-        frame += 1;
+        display.draw_test_animation().await;
     }
 
     // ========== DUAL-CORE CODE COMMENTED OUT ==========

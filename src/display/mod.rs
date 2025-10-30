@@ -6,60 +6,51 @@ use crate::config::{
     DISPLAY_HEIGHT, DISPLAY_WIDTH, WAVEFORM_BUFFER_SIZE, WAVEFORM_SAMPLES_PER_PIXEL,
     WAVEFORM_SCROLL_RATE,
 };
-// ASYNC VERSION imports
-use embassy_embedded_hal::shared_bus::asynch::spi::SpiDevice;
-use embassy_sync::{blocking_mutex::raw::NoopRawMutex, mutex::Mutex};
 use embassy_time::Delay;
 use embedded_graphics::{
     pixelcolor::Rgb565,
     prelude::*,
     primitives::{Line, PrimitiveStyle},
 };
+use embedded_hal_bus::spi::ExclusiveDevice;
 use esp_hal::{gpio::Output, spi::master::SpiDmaBus};
 
-// ASYNC VERSION: Using async ssd1351 fork
 use ssd1351::{
     display_async::DisplayAsync,
     mode::GraphicsModeAsync,
     prelude::SPIInterface,
     properties::{DisplayRotation, DisplaySize},
 };
-
 use static_cell::StaticCell;
 
 const FRAMEBUFFER_SIZE: usize = (DISPLAY_WIDTH * DISPLAY_HEIGHT * 2) as usize;
 static FRAMEBUFFER: StaticCell<[u8; FRAMEBUFFER_SIZE]> = StaticCell::new();
 
-// ASYNC VERSION types
-type SpiBusType = Mutex<NoopRawMutex, SpiDmaBus<'static, esp_hal::Async>>;
-type SpiDeviceType = SpiDevice<'static, NoopRawMutex, SpiDmaBus<'static, esp_hal::Async>, Output<'static>>;
+type SpiDeviceType = ExclusiveDevice<SpiDmaBus<'static, esp_hal::Async>, Output<'static>, Delay>;
 
 /// SSD1351 OLED driver with oscilloscope rendering.
 pub struct DisplayDriver {
-    // ASYNC VERSION
     display: GraphicsModeAsync<SPIInterface<SpiDeviceType, Output<'static>>>,
     local_read_index: f32,
     pub cached_waveform: [i16; WAVEFORM_BUFFER_SIZE],
+    animation_start: embassy_time::Instant,
+    last_flush_ms: u64,
 }
 
 impl DisplayDriver {
-    /// Initialize display driver - ASYNC VERSION
-    ///
-    /// Converts blocking SPI to async and wraps in Embassy SpiDevice
+    /// Initialize display driver with async SPI + DMA
     pub async fn new(
         spi: SpiDmaBus<'static, esp_hal::Blocking>,
         cs: Output<'static>,
         dc: Output<'static>,
         mut rst: Output<'static>,
     ) -> Self {
-        // ASYNC VERSION
-        log::info!("Converting SPI to async mode on Core 1...");
+        log::info!("Converting SPI to async mode...");
         let spi_async = spi.into_async();
-        log::info!("Wrapping SPI bus in Mutex for embassy SpiDevice...");
-        static SPI_BUS: StaticCell<SpiBusType> = StaticCell::new();
-        let spi_bus = SPI_BUS.init(Mutex::new(spi_async));
-        log::info!("Creating embassy SpiDevice with CS pin...");
-        let spi_device = SpiDevice::new(spi_bus, cs);
+
+        log::info!("Creating ExclusiveDevice with CS pin...");
+        let spi_device = ExclusiveDevice::new(spi_async, cs, Delay)
+            .expect("Failed to create SPI device");
         let interface = SPIInterface::new(spi_device, dc);
 
         log::info!("Initializing framebuffer...");
@@ -116,10 +107,7 @@ impl DisplayDriver {
             panic!("Test pattern flush failed");
         }
         let duration = embassy_time::Instant::now() - start;
-        log::info!(
-            "ASYNC: Test pattern flush took {}ms",
-            duration.as_millis()
-        );
+        log::info!("Test pattern flush took {}ms", duration.as_millis());
 
         Self {
             display,
@@ -127,68 +115,77 @@ impl DisplayDriver {
             // Display scrolls at WAVEFORM_SCROLL_RATE to naturally lag behind write head
             local_read_index: 0.0,
             cached_waveform: [0; WAVEFORM_BUFFER_SIZE],
+            animation_start: embassy_time::Instant::now(),
+            last_flush_ms: 0,
         }
     }
 
-    /// Simple test animation: bouncing rectangle - ASYNC VERSION
-    pub async fn draw_test_animation(&mut self, frame: u32) {
-        // Log every frame for first 5, then periodically
-        if frame < 5 {
-            log::info!("Frame {}: Starting test animation", frame);
-        }
+    /// Test animation with time-based movement and smooth wrapping.
+    /// Time-based ensures animation speed is independent of DISPLAY_REFRESH_RATE_HZ.
+    pub async fn draw_test_animation(&mut self) {
+        // Time-based position (constant speed regardless of FPS)
+        let elapsed = embassy_time::Instant::now() - self.animation_start;
+        let elapsed_secs = elapsed.as_millis() as f32 / 1000.0;
+        let pixels_per_second = 50.0; // Constant velocity
+        let x_pos_float = (elapsed_secs * pixels_per_second) % DISPLAY_WIDTH as f32;
+        let x_pos = x_pos_float as i32;
 
-        // Draw to RAM buffer (fast) - sync in buffered mode
-        self.display.clear(); // clear to black (only touches RAM)
+        // Clear framebuffer
+        self.display.clear();
 
         use embedded_graphics::primitives::{PrimitiveStyleBuilder, Rectangle};
 
-        let x_pos = ((frame * 2) % DISPLAY_WIDTH) as i32;
+        // Rectangle dimensions
+        let rect_width = 20;
+        let rect_height = 20;
+        let y_pos = 50;
 
-        Rectangle::new(Point::new(x_pos, 50), Size::new(20, 20))
-            .into_styled(
-                PrimitiveStyleBuilder::new()
-                    .fill_color(Rgb565::GREEN)
-                    .build(),
-            )
+        let rect_style = PrimitiveStyleBuilder::new()
+            .fill_color(Rgb565::GREEN)
+            .build();
+
+        // Draw main rectangle
+        Rectangle::new(Point::new(x_pos, y_pos), Size::new(rect_width, rect_height))
+            .into_styled(rect_style)
             .draw(&mut self.display)
             .ok();
 
-        // ASYNC flush
-        if frame < 5 {
-            log::info!("Frame {}: Calling async flush()...", frame);
+        // Smooth wrapping: when rect extends past right edge, draw wrapped portion on left
+        if x_pos + rect_width as i32 > DISPLAY_WIDTH as i32 {
+            let wrapped_x = x_pos - DISPLAY_WIDTH as i32;
+            Rectangle::new(
+                Point::new(wrapped_x, y_pos),
+                Size::new(rect_width, rect_height),
+            )
+            .into_styled(rect_style)
+            .draw(&mut self.display)
+            .ok();
         }
 
-        let start = embassy_time::Instant::now();
+        // Draw flush time from previous frame at top
+        use embedded_graphics::mono_font::{ascii::FONT_6X10, MonoTextStyle};
+        use embedded_graphics::text::Text;
+
+        let text_style = MonoTextStyle::new(&FONT_6X10, Rgb565::WHITE);
+        let mut text_buffer = heapless::String::<32>::new();
+        use core::fmt::Write;
+        write!(&mut text_buffer, "{}ms", self.last_flush_ms).ok();
+        Text::new(&text_buffer, Point::new(2, 10), text_style)
+            .draw(&mut self.display)
+            .ok();
+
+        // Flush and measure timing
+        let flush_start = embassy_time::Instant::now();
         if let Err(e) = self.display.flush().await {
-            log::error!("Frame {}: Flush failed: {:?}", frame, e);
+            log::error!("Flush failed: {:?}", e);
             panic!("Flush failed");
         }
-        let duration = embassy_time::Instant::now() - start;
-
-        // Calculate effective SPI clock from timing
-        let duration_ms = duration.as_millis();
-        let bytes_transferred = FRAMEBUFFER_SIZE;
-        let effective_mhz = if duration_ms > 0 {
-            (bytes_transferred as u64 * 8) / (duration_ms * 1000)
-        } else {
-            0
-        };
-
-        if frame < 10 || frame % 30 == 0 {
-            log::info!(
-                "Frame {}: FLUSH completed: {}ms ({}KB) → {}MHz (expect 20MHz @ 13ms)",
-                frame,
-                duration_ms,
-                bytes_transferred / 1024,
-                effective_mhz
-            );
-        }
+        self.last_flush_ms = (embassy_time::Instant::now() - flush_start).as_millis();
     }
 
     /// Oscilloscope rendering: average mode with connected lines.
     ///
     /// Performance: Drawing to RAM ~10µs (sync), flush via DMA.
-    /// ASYNC VERSION
     pub async fn draw_waveform(&mut self) {
         static mut FRAME_COUNT: u32 = 0;
         static mut FLUSH_START_MS: u64 = 0;

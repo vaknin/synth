@@ -25,7 +25,6 @@ pub async fn display_task(
     log::info!("Display initialized successfully");
 
     let mut ticker = Ticker::every(Duration::from_hz(DISPLAY_REFRESH_RATE_HZ as u64));
-    let mut frame_count = 0u32;
 
     log::info!(
         "Display task entering main loop at {}Hz",
@@ -36,14 +35,7 @@ pub async fn display_task(
         // Wait for next frame time (phase-locked to DISPLAY_REFRESH_RATE_HZ)
         ticker.next().await;
 
-        // Simple test: draw animated rectangle (no audio waveform)
-        display.draw_test_animation(frame_count).await;
-
-        frame_count += 1;
-
-        // Log every 30 frames (1 second at 30 Hz)
-        if frame_count % 30 == 0 {
-            log::info!("Display test: frame={}", frame_count);
-        }
+        // Time-based test animation (independent of refresh rate)
+        display.draw_test_animation().await;
     }
 }

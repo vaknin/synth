@@ -7,7 +7,7 @@ Audio synthesizer with oscillators, filters, LFOs, and real-time OLED waveform v
 **✅ WORKING (2025-10-30):**
 - Async SPI + DMA on Core 0 (single-core test in `main.rs`)
 - Hardware/wiring verified correct
-- `ssd1351-async` crate working with Embassy `SpiDevice`
+- `ssd1351-async` crate with `embedded-hal-bus::ExclusiveDevice` (idiomatic single-device pattern)
 - Test pattern renders successfully (13ms flush @ 20 MHz)
 
 **❌ BLOCKED:**
@@ -26,7 +26,8 @@ Audio synthesizer with oscillators, filters, LFOs, and real-time OLED waveform v
 
 # Documentation
 
-**Architecture:**
+**References:**
+- [ESP-HAL API (ESP32-S3)](https://docs.espressif.com/projects/rust/esp-hal/1.0.0/esp32s3/esp_hal/index.html) - Hardware abstraction layer
 - `docs/mvp/ARCHITECTURE.md` - Processing rates, optimizations, patterns
 
 **Dual-Core:**
@@ -42,6 +43,10 @@ Audio synthesizer with oscillators, filters, LFOs, and real-time OLED waveform v
 - I2S: GPIO35/36/37 (safe on N16R8)
 - Pots: GPIO1 (cutoff), GPIO2 (resonance)
 - Display: GPIO9-13 (SPI2, 20 MHz, SSD1351 128×128 OLED)
+  - **SPI Pattern**: `embedded-hal-bus::ExclusiveDevice` (not Embassy `shared_bus`) - idiomatic for single-device SPI
+    - Direct SPI ownership, zero mutex overhead
+    - CS auto-managed by ExclusiveDevice wrapper
+    - Embassy `shared_bus::SpiDevice` only needed when multiple devices share one SPI bus
   - Display controls own read pointer (local_read_index), advances by WAVEFORM_SCROLL_RATE per frame
   - **CRITICAL**: local_read_index MUST initialize to 0.0 (same as audio write_index start)
     - Initializing to WAVEFORM_BUFFER_SIZE/2 causes display to read uninitialized zeros → straight line bug
