@@ -30,9 +30,18 @@ pub async fn display_test_task(
         DISPLAY_REFRESH_RATE_HZ
     );
 
+    // Diagnostic: log every ~2 seconds to verify task is running
+    let mut frame_count = 0u32;
+
     loop {
         ticker.next().await;
         display.draw_test_animation().await;
+
+        frame_count += 1;
+        if frame_count % 90 == 0 {
+            // Log every 90 frames = every 2 seconds (90 / 45Hz)
+            log::info!("display_task: {} frames rendered", frame_count);
+        }
     }
 }
 

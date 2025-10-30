@@ -1,14 +1,36 @@
 //! Control tasks: potentiometers polling for drone synth.
+//!
+//! # Embassy Task Parameter Guidelines
+//!
+//! When spawning Embassy tasks, keep parameters small (<1KB) to avoid executor stack overflow.
+//! Large peripheral structures (especially ADC with calibration ~13KB) must be initialized
+//! INSIDE the task, not passed as parameters.
+//!
+//! Pattern:
+//! ```rust
+//! // ✅ DO: Pass raw peripherals (~8 bytes each)
+//! #[embassy_executor::task]
+//! pub async fn my_task(raw: RAW_PERIPHERAL) {
+//!     let initialized = hardware::setup(raw);  // Init on task stack
+//!     // ...
+//! }
+//!
+//! // ❌ DON'T: Pass initialized peripherals with calibration data
+//! #[embassy_executor::task]
+//! pub async fn my_task(initialized: LARGE_TYPE) {  // May overflow spawn frame!
+//!     // ...
+//! }
+//! ```
 
 use crate::config::*;
 use crate::controls::{map_cutoff, map_resonance, CtrlSender, Potentiometer};
-use crate::hardware::{AdcBus, AnyAdcPin};
+use crate::hardware;
 use embassy_time::{Duration, Timer};
 
-/// Potentiometer polling task: sequentially reads 2 pots.
+/// Potentiometer polling task: initializes ADC internally on Core 1.
 ///
-/// Owns the ADC peripheral and all pot pins. Each pot has independent
-/// signal processing state (EMA filter, deadband) but shares the hardware.
+/// Takes raw GPIO peripherals and configures ADC inside the task,
+/// avoiding large parameter capture (ADC calibration data ~13KB).
 ///
 /// Simplified 2-pot setup for drone synth:
 /// - Pot 0 (GPIO1): Filter Cutoff
@@ -16,25 +38,40 @@ use embassy_time::{Duration, Timer};
 ///
 /// # Arguments
 /// * `sender` - Embassy channel sender for control messages
-/// * `adc_bus` - ADC bus with ADC peripheral (owned by this task)
-/// * `pins` - Array of 2 type-erased ADC pins (owned by this task)
+/// * `adc1` - Raw ADC1 peripheral (not initialized)
+/// * `gpio1` - Raw GPIO1 peripheral for Pot 0
+/// * `gpio2` - Raw GPIO2 peripheral for Pot 1
 #[embassy_executor::task]
-pub async fn pot_task(sender: CtrlSender, mut adc_bus: AdcBus, mut pins: [AnyAdcPin; 2]) {
-    // Create pot state objects with mapping functions
+pub async fn pot_task(
+    sender: CtrlSender,
+    adc1: esp_hal::peripherals::ADC1<'static>,
+    gpio1: esp_hal::peripherals::GPIO1<'static>,
+    gpio2: esp_hal::peripherals::GPIO2<'static>,
+) {
+    // Initialize ADC inside task (runs on Core 1 task stack, not executor stack)
+    log::info!("pot_task: Initializing ADC on Core 1...");
+    let (mut adc_bus, mut pins) = hardware::setup_adc(adc1, gpio1, gpio2);
+    log::info!("pot_task: ADC initialized");
+
     let mut pots = [
-        Potentiometer::new(map_cutoff),    // GPIO1
-        Potentiometer::new(map_resonance), // GPIO2
+        Potentiometer::new(map_cutoff),
+        Potentiometer::new(map_resonance),
     ];
 
+    // Diagnostic: log every ~2 seconds to verify task is running
+    let mut poll_count = 0u32;
+
     loop {
-        // Poll each pot sequentially
-        // Note: This task runs on Core 1 (isolated from audio on Core 0)
-        // Blocking ADC reads here don't affect audio streaming on the other core
         for (pot, pin) in pots.iter_mut().zip(pins.iter_mut()) {
             pot.poll_and_send(sender, pin, &mut adc_bus.adc).await;
         }
 
-        // Wait before next poll cycle
+        poll_count += 1;
+        if poll_count % 100 == 0 {
+            // Log every 100 cycles = every 2 seconds (100 × 20ms)
+            log::info!("pot_task: {} polls completed", poll_count);
+        }
+
         Timer::after(Duration::from_millis(ADC_POLL_INTERVAL_MS)).await;
     }
 }

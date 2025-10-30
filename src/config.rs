@@ -3,14 +3,22 @@
 
 // === System Architecture ===
 
+/// Stack size for Core 0 (PRO_CPU) - Main audio loop.
+/// Configured by esp-rtos runtime, typically 8-16KB (not directly configurable in code).
+/// Core 0 runs: Engine audio rendering + I2S DMA callbacks.
+/// This constant is for documentation only - actual Core 0 stack is controlled by esp-rtos.
+pub const CORE_0_STACK_SIZE_ESTIMATE: usize = 16384; // 16KB (runtime default)
+
 /// Stack size for Core 1 (APP_CPU) - Embassy executor + ADC polling + display rendering.
-/// 64KB accounts for:
-/// - Embassy executor overhead (~2KB)
-/// - display_task DMA buffer allocation: 33KB (32736 bytes + descriptors)
-/// - DisplayDriver initialization: 32KB static framebuffer + temporaries (~2KB)
-/// - display_task frame rendering: embedded-graphics temporary objects (~1KB)
-/// Total ~38KB used, 64KB provides safe headroom
-pub const APP_CORE_STACK_SIZE: usize = 65536;
+/// Increased to 96KB to accommodate ADC init (with calibration data) + display framebuffer.
+/// Stack usage breakdown:
+/// - Embassy executor overhead (~2-4KB)
+/// - pot_task: ADC init on Core 1 stack (~13KB calibration data)
+/// - display_task SPI DMA setup + peripherals (~2KB)
+/// - DisplayDriver initialization: 32KB framebuffer + ~2KB temporaries
+/// - XTensa call stack depth + alignment padding (~5-10KB)
+/// Total estimated ~54KB, 96KB provides safe headroom.
+pub const CORE_1_STACK_SIZE: usize = 98304; // 96KB
 
 // === Synth Engine ===
 
@@ -128,7 +136,7 @@ pub const ADC_POLL_INTERVAL_MS: u64 = 20;
 /// Number of ADC samples to average per reading (multisampling) for noise reduction.
 /// 9 samples provides √9 = 3× noise reduction for clean, stable readings.
 /// Combined with EMA filter (alpha=0.8) for maximum signal quality.
-/// Dual-core architecture allows high multisampling without audio impact.
+/// IMPORTANT: poll_and_send() uses yield_now() between samples (not Timer::after).
 pub const ADC_MULTISAMPLING_COUNT: usize = 9;
 
 /// Reciprocal of ADC_MULTISAMPLING_COUNT for division elimination.

@@ -37,6 +37,25 @@ Audio synthesizer with oscillators, filters, LFOs, and real-time OLED waveform v
   - Embassy Signal: Waveform data (Core 0 → Core 1, latest-value semantics)
   - Pattern: Message-passing over shared mutable state
 
+**Embassy Task Spawning (Critical Pattern):**
+- **Keep task parameters small** - spawner copies all params onto executor spawn stack during `.spawn()`
+- ✅ Pass raw peripheral handles (thin types: `ADC1`, `GPIO1`, etc. - ~8 bytes each)
+- ✅ Initialize heavy peripherals INSIDE tasks (on task's own stack)
+- ❌ DON'T pass initialized peripherals with calibration data (e.g., `Adc<ADC1>` with curves ~4-8KB)
+- Example:
+  ```rust
+  // WRONG: Heavy param copy during spawn (13KB)
+  let (adc_bus, pins) = setup_adc(peripherals.ADC1, ...);
+  spawner.spawn(pot_task(adc_bus, pins))  // ❌ Overflows executor spawn stack
+
+  // RIGHT: Light param copy, heavy init inside task
+  spawner.spawn(pot_task(peripherals.ADC1, peripherals.GPIO1))  // ✅ ~16 bytes
+  // Inside pot_task:
+  let (adc_bus, pins) = setup_adc(adc1, gpio1);  // Init on task's own stack
+  ```
+- Symptom of violation: `BusWriteError` or memory corruption during spawn, even with large stack sizes
+- Root cause: Executor spawn stack frame is small, separate from task execution stack
+
 **GPIO (Phase 1):**
 - I2S: GPIO35/36/37 (safe on N16R8)
 - Pots: GPIO1 (cutoff), GPIO2 (resonance)
