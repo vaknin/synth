@@ -95,8 +95,6 @@ async fn main(spawner: Spawner) {
 
     // ========== PHASE 2.2: START CORE 1 WITH DISPLAY TASK ==========
 
-    // COMMENTED OUT FOR SINGLE-CORE TEST
-    /*
     // Initialize Core 1 stack (must happen after esp_rtos::start)
     let core_1_stack = CORE_1_STACK.init(Stack::new());
 
@@ -138,22 +136,6 @@ async fn main(spawner: Spawner) {
             });
         },
     );
-    */
-
-    // SINGLE-CORE TEST: Run both tasks on Core 0
-    log::info!("SINGLE-CORE TEST: Spawning both tasks on Core 0...");
-
-    // Spawn pot_task on Core 0
-    spawner
-        .spawn(synth::controls::task::pot_task(producer, adc1, gpio1, gpio2))
-        .expect("Failed to spawn pot task on Core 0");
-    log::info!("pot_task spawned on Core 0");
-
-    // Spawn display task on Core 0
-    spawner
-        .spawn(synth::display::task::display_test_task(spi, cs, dc, rst))
-        .expect("Failed to spawn display task on Core 0");
-    log::info!("display_task spawned on Core 0");
 
     log::info!("Core 0: Initializing Engine...");
     let mut engine = Engine::new(consumer, waveform_signal);
