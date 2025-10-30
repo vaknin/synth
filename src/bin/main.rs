@@ -12,7 +12,7 @@
 #![no_main]
 
 use embassy_executor::Spawner;
-use embassy_sync::{channel::Channel, signal::Signal};
+use embassy_sync::{channel::Channel, watch::Watch};
 use esp_backtrace as _;
 use esp_hal::{dma_circular_buffers, system::Stack, timer::timg::TimerGroup};
 use static_cell::StaticCell;
@@ -23,8 +23,8 @@ esp_bootloader_esp_idf::esp_app_desc!();
 /// Global MPSC channel for control → audio communication (Core 1 → Core 0)
 static CHANNEL: SynthChannel = Channel::new();
 
-/// Global Signal for waveform data (Core 0 → Core 1, latest-value semantics)
-static WAVEFORM_SIGNAL: WaveformSignal = Signal::new();
+/// Global Watch for waveform data (Core 0 → Core 1, latest-value semantics, non-blocking reads)
+static WAVEFORM_SIGNAL: WaveformSignal = Watch::new();
 
 /// Stack for Core 1 (APP_CPU) - ADC polling + display tasks.
 static CORE_1_STACK: StaticCell<Stack<CORE_1_STACK_SIZE>> = StaticCell::new();
@@ -125,10 +125,10 @@ async fn main(spawner: Spawner) {
                     .expect("Failed to spawn pot task on Core 1");
                 log::info!("pot_task spawned");
 
-                // Spawn display test task on Core 1 (converts blocking SPI to async on Core 1)
+                // Spawn waveform display task on Core 1 (converts blocking SPI to async on Core 1)
                 log::info!("Spawning display_task...");
                 spawner
-                    .spawn(synth::display::task::display_test_task(spi, cs, dc, rst))
+                    .spawn(synth::display::task::display_task(spi, cs, dc, rst, waveform_signal))
                     .expect("Failed to spawn display task on Core 1");
                 log::info!("display_task spawned");
 

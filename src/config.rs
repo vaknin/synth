@@ -242,8 +242,8 @@ pub const GENERATIVE_OCTAVE_RANGE_MAX: f32 = 4.0;
 pub const DISPLAY_WIDTH: u32 = 128;
 pub const DISPLAY_HEIGHT: u32 = 128;
 
-/// Display refresh rate
-pub const DISPLAY_REFRESH_RATE_HZ: u32 = 45;
+/// Display refresh rate (supported range: 15-60Hz, optimal: 30-45Hz)
+pub const DISPLAY_REFRESH_RATE_HZ: u32 = 30;
 
 /// Using IOMUX pins (GPIO10/11/12) for optimal high-speed performance.
 /// Note: Exceeds datasheet spec - test stability thoroughly. Use 20_000_000 for safe mode.
@@ -277,3 +277,18 @@ pub const WAVEFORM_SAMPLES_PER_PIXEL: f32 =
 /// Ensures scroll velocity perfectly matches audio production at any refresh rate.
 pub const WAVEFORM_SCROLL_RATE: f32 =
     (SAMPLE_RATE / WAVEFORM_DECIMATION_FACTOR) as f32 / DISPLAY_REFRESH_RATE_HZ as f32;
+
+/// Waveform send interval (decimated samples between Watch updates).
+/// Adaptive: sends at 2× display refresh rate for smooth updates with minimal overhead.
+/// At 30Hz display → 60Hz send rate; at 45Hz → 90Hz; at 60Hz → 120Hz.
+/// Clamps to minimum of 1 sample to prevent division by zero.
+pub const WAVEFORM_SEND_INTERVAL: u32 = {
+    let decimated_rate = SAMPLE_RATE / WAVEFORM_DECIMATION_FACTOR;
+    let target_send_rate = DISPLAY_REFRESH_RATE_HZ * 2;
+    let interval = decimated_rate / target_send_rate;
+    if interval < 1 {
+        1
+    } else {
+        interval
+    }
+};

@@ -2,7 +2,7 @@
 
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex as ChannelMutex;
 use embassy_sync::channel::{Channel, Receiver};
-use embassy_sync::signal::Signal;
+use embassy_sync::watch::Watch;
 use esp_hal::i2s::master::asynch::I2sWriteDmaTransferAsync;
 
 use crate::{
@@ -32,8 +32,8 @@ pub type AudioStream = I2sWriteDmaTransferAsync<'static, &'static mut [u8]>;
 pub type SynthChannel = Channel<ChannelMutex, Message, MESSAGE_QUEUE_SIZE>;
 pub type ChannelReceiver = Receiver<'static, ChannelMutex, Message, MESSAGE_QUEUE_SIZE>;
 
-// Waveform Signal for Engine → Display communication (latest-value semantics)
-pub type WaveformSignal = Signal<ChannelMutex, WaveformData>;
+// Waveform Watch for Engine → Display communication (latest-value semantics, non-blocking reads)
+pub type WaveformSignal = Watch<ChannelMutex, WaveformData, 1>;
 
 // Computed once instead of per-sample
 pub const I16_MAX_F32: f32 = i16::MAX as f32;

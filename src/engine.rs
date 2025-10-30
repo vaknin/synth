@@ -1,12 +1,16 @@
 //! Engine module: manages oscillators, processes messages, renders audio.
 
-use crate::config::{MASTER_GAIN, WAVEFORM_BUFFER_SIZE, WAVEFORM_DECIMATION_FACTOR};
+use crate::config::{
+    MASTER_GAIN, WAVEFORM_BUFFER_SIZE, WAVEFORM_DECIMATION_FACTOR, WAVEFORM_SEND_INTERVAL,
+};
 use crate::filter::MoogLadderFilter;
 use crate::lfo::LFO;
 use crate::message::Message;
 use crate::oscillator::{Oscillator, Waveform};
 use crate::slew::Slew;
-use crate::{AudioStream, ChannelReceiver, WaveformSignal, I16_MAX_F32};
+use crate::{AudioStream, ChannelReceiver, WaveformData, WaveformSignal, I16_MAX_F32};
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_sync::watch::Sender;
 
 /// Waveform capture state for oscilloscope visualization.
 ///
@@ -64,8 +68,8 @@ pub struct Engine {
     /// Waveform capture state for oscilloscope display
     waveform_capture: WaveformCapture,
 
-    /// Signal for sending waveform data to display (Core 0 → Core 1)
-    waveform_signal: &'static WaveformSignal,
+    /// Watch sender for sending waveform data to display (Core 0 → Core 1)
+    waveform_sender: Sender<'static, CriticalSectionRawMutex, WaveformData, 1>,
 }
 
 impl Engine {
@@ -73,7 +77,7 @@ impl Engine {
     ///
     /// # Arguments
     /// * `receiver` - Embassy channel receiver for control messages
-    /// * `waveform_signal` - Signal for sending waveform data to display
+    /// * `waveform_signal` - Watch for sending waveform data to display
     ///
     /// # Returns
     /// Engine with single sine oscillator at 220Hz (A3), always on at full level.
@@ -105,7 +109,7 @@ impl Engine {
             base_cutoff: crate::config::FILTER_CUTOFF_MIN,
             lfo_cutoff_range: 0.0, // LFO disabled - no modulation applied
             waveform_capture: WaveformCapture::new(),
-            waveform_signal,
+            waveform_sender: waveform_signal.sender(),
         }
     }
 
@@ -149,14 +153,15 @@ impl Engine {
     /// AUDIO RATE (44,100 Hz): Render one audio sample - SUPER HOT PATH!
     ///
     /// Simplified for single drone oscillator:
-    /// - Single oscillator tick() (no mixing, no normalization, no filtering)
+    /// - Single oscillator tick() → filter
     ///
     /// # Returns
     /// Raw mono sample (before master gain and soft-start)
     #[inline]
     fn render_sample(&mut self) -> f32 {
-        // Single oscillator tick (220Hz A3 drone at full level, no filter)
-        self.oscillator.tick()
+        // Single oscillator tick (220Hz A3 drone at full level) → Moog filter
+        let sample = self.oscillator.tick();
+        self.filter.process(sample)
     }
 
     /// Render audio samples into the DMA buffer.
@@ -214,18 +219,17 @@ impl Engine {
                         self.waveform_capture.write_index += 1;
                         self.waveform_capture.send_counter += 1;
 
-                        // Send periodically: every ~7 decimated samples (matches 30Hz refresh)
-                        // At 882 Hz decimated / 30 Hz display ≈ 29 samples/frame
-                        // Send more frequently for lower latency (every ~7 samples = ~127 Hz)
-                        const SEND_INTERVAL: u32 = 7;
-                        if self.waveform_capture.send_counter >= SEND_INTERVAL {
+                        // Send periodically: adaptive rate (2× display refresh for smooth updates)
+                        // At 30Hz display: send every 81 samples (~60 Hz)
+                        // At 45Hz display: send every 54 samples (~90 Hz)
+                        // At 60Hz display: send every 40 samples (~120 Hz)
+                        if self.waveform_capture.send_counter >= WAVEFORM_SEND_INTERVAL {
                             self.waveform_capture.send_counter = 0;
 
-                            // DISABLED for display timing test
-                            // let data = WaveformData {
-                            //     samples: self.waveform_capture.buffer,
-                            // };
-                            // self.waveform_signal.signal(data);
+                            let data = WaveformData {
+                                samples: self.waveform_capture.buffer,
+                            };
+                            self.waveform_sender.send(data);
                         }
 
                         // Wrap around at buffer size (circular buffer)

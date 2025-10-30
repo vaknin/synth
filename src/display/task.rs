@@ -3,6 +3,7 @@
 use super::DisplayDriver;
 use crate::config::DISPLAY_REFRESH_RATE_HZ;
 use crate::WaveformSignal;
+use embassy_futures::select::{select, Either};
 use embassy_time::{Duration, Ticker};
 use esp_hal::{gpio::Output, spi::master::SpiDmaBus};
 
@@ -30,8 +31,8 @@ pub async fn display_test_task(
 
 /// OLED refresh task with waveform rendering (for dual-core operation).
 ///
-/// Reads waveform data from Signal and renders oscilloscope view.
-/// Currently unused - will be activated in Step 2+ when moving to Core 1.
+/// Reads waveform data from Watch and renders oscilloscope view.
+/// Uses non-blocking try_changed() to avoid frame timing issues.
 #[embassy_executor::task]
 pub async fn display_task(
     spi: SpiDmaBus<'static, esp_hal::Blocking>,
@@ -45,6 +46,11 @@ pub async fn display_task(
     let mut display = DisplayDriver::new(spi, cs, dc, rst).await;
     log::info!("Display initialized successfully");
 
+    // Get receiver handle for non-blocking reads
+    let mut waveform_rx = waveform_signal
+        .receiver()
+        .expect("Failed to get waveform receiver");
+
     let mut ticker = Ticker::every(Duration::from_hz(DISPLAY_REFRESH_RATE_HZ as u64));
 
     log::info!(
@@ -53,13 +59,16 @@ pub async fn display_task(
     );
 
     loop {
-        ticker.next().await;
-
-        // Read latest waveform snapshot from Signal
-        let waveform = waveform_signal.wait().await;
-        display.cached_waveform.copy_from_slice(&waveform.samples);
-
-        // Render oscilloscope
-        display.draw_waveform().await;
+        // Wait for EITHER ticker OR new waveform (fixed frame timing!)
+        match select(ticker.next(), waveform_rx.changed()).await {
+            Either::First(_) => {
+                // Ticker fired - render using cached waveform
+                display.draw_waveform().await;
+            }
+            Either::Second(waveform) => {
+                // New waveform arrived - update cache
+                display.cached_waveform.copy_from_slice(&waveform.samples);
+            }
+        }
     }
 }
