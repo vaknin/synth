@@ -101,9 +101,9 @@ pub fn setup_audio(
 
 /// Initialize SPI for SSD1351 OLED display.
 ///
-/// Configures SPI2 peripheral at 20 MHz for RGB OLED communication.
-/// Uses IOMUX pins (GPIO10/11/12) for optimal high-speed performance.
-/// Returns configured SPI bus and GPIO pins for SSD1351 driver.
+/// Configures SPI2 peripheral at 20 MHz for RGB OLED communication in Blocking mode.
+/// Creates DMA buffers on Core 0, but peripheral can be safely moved to Core 1.
+/// Core 1 should call `.into_async()` to bind DMA interrupts to Core 1.
 ///
 /// # Pin Configuration
 /// - DIN/MOSI => GPIO11 (SPI2 MOSI)
@@ -112,16 +112,8 @@ pub fn setup_audio(
 /// - DC => GPIO9 (data/command select)
 /// - RST => GPIO13 (reset)
 ///
-/// # Arguments
-/// * `spi2` - SPI2 peripheral
-/// * `dc_gpio` - DC pin (data/command select, GPIO9)
-/// * `cs_gpio` - CS pin (chip select, GPIO10)
-/// * `mosi_gpio` - MOSI pin (DIN on display, GPIO11)
-/// * `sck_gpio` - SCK pin (CLK on display, GPIO12)
-/// * `rst_gpio` - RST pin (reset, GPIO13)
-///
 /// # Returns
-/// Tuple of (SPI bus, CS pin, DC pin, RST pin) ready for SSD1351 driver initialization
+/// Tuple of (SPI bus, CS pin, DC pin, RST pin) ready for cross-core transfer
 pub fn setup_spi_display(
     spi2: Spi2Peripheral,
     dma_channel: DmaChannel1,
@@ -138,26 +130,36 @@ pub fn setup_spi_display(
 ) {
     use esp_hal::gpio::{Level, Output, OutputConfig};
     use esp_hal::spi::master::{Config, Spi};
+    use esp_hal::spi::Mode;
     use esp_hal::time::Rate;
 
-    // Create DMA buffers (33KB for display framebuffer: 128×128×2 = 32768 bytes)
-    // 10 descriptors: Each descriptor handles max 4092 bytes, 32768/4092 ≈ 8 needed
-    let (rx_buffer, rx_descriptors, tx_buffer, tx_descriptors) = dma_buffers!(33000, 10);
+    // DMA buffers: minimal RX (4 bytes), TX buffer within ESP-HAL limit
+    // ESP-HAL SPI DMA limit is 32736 bytes/transfer
+    let (rx_buffer, rx_descriptors, tx_buffer, tx_descriptors) = dma_buffers!(4, 32736);
 
-    let dma_rx_buf = DmaRxBuf::new(rx_descriptors, rx_buffer).expect("Failed to create RX DMA buffer");
-    let dma_tx_buf = DmaTxBuf::new(tx_descriptors, tx_buffer).expect("Failed to create TX DMA buffer");
+    let dma_rx_buf =
+        DmaRxBuf::new(rx_descriptors, rx_buffer).expect("Failed to create RX DMA buffer");
+    let dma_tx_buf =
+        DmaTxBuf::new(tx_descriptors, tx_buffer).expect("Failed to create TX DMA buffer");
 
     // Configure SPI with DMA (in Blocking mode for cross-core transfer)
-    // Will be converted to Async on Core 1 to register interrupt handler correctly
+    // SSD1351 datasheet specifies Mode 3 (CPOL=1, CPHA=1): clock idles HIGH, data sampled on rising edge
+    log::info!(
+        "Configuring SPI at {}MHz...",
+        crate::config::DISPLAY_SPI_FREQUENCY_HZ / 1_000_000
+    );
     let spi_bus = Spi::new(
         spi2,
-        Config::default().with_frequency(Rate::from_hz(crate::config::DISPLAY_SPI_FREQUENCY_HZ)),
+        Config::default()
+            .with_frequency(Rate::from_hz(crate::config::DISPLAY_SPI_FREQUENCY_HZ))
+            .with_mode(Mode::_3), // Mode 3 per SSD1351 datasheet specification
     )
     .expect("Failed to create SPI")
     .with_sck(sck_gpio)
     .with_mosi(mosi_gpio)
     .with_dma(dma_channel)
     .with_buffers(dma_rx_buf, dma_tx_buf);
+    log::info!("SPI configured successfully");
     // NOTE: Do NOT call .into_async() here - peripheral must be Send to move to Core 1
 
     // Configure control pins as outputs

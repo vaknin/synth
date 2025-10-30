@@ -4,12 +4,13 @@
 // === System Architecture ===
 
 /// Stack size for Core 1 (APP_CPU) - Embassy executor + ADC polling + display rendering.
-/// 40KB accounts for:
-/// - Embassy executor overhead (~1-2KB)
-/// - DisplayDriver initialization: temporary 32KB framebuffer array during FRAMEBUFFER.init()
-/// - DisplayDriver with cached WaveformData (~2KB)
-/// - display_task: embedded-graphics creates 127 temporary Line objects per frame
-pub const APP_CORE_STACK_SIZE: usize = 40960;
+/// 64KB accounts for:
+/// - Embassy executor overhead (~2KB)
+/// - display_task DMA buffer allocation: 33KB (32736 bytes + descriptors)
+/// - DisplayDriver initialization: 32KB static framebuffer + temporaries (~2KB)
+/// - display_task frame rendering: embedded-graphics temporary objects (~1KB)
+/// Total ~38KB used, 64KB provides safe headroom
+pub const APP_CORE_STACK_SIZE: usize = 65536;
 
 // === Synth Engine ===
 
@@ -234,20 +235,21 @@ pub const GENERATIVE_OCTAVE_RANGE_MAX: f32 = 4.0;
 pub const DISPLAY_WIDTH: u32 = 128;
 pub const DISPLAY_HEIGHT: u32 = 128;
 
-/// Display refresh rate: 30Hz (39% util), 60Hz (78% util), 120Hz (high).
-pub const DISPLAY_REFRESH_RATE_HZ: u32 = 30;
+/// Display refresh rate
+pub const DISPLAY_REFRESH_RATE_HZ: u32 = 60;
 
-/// SPI clock: 20 MHz max (SSD1351 datasheet limit).
-pub const DISPLAY_SPI_FREQUENCY_HZ: u32 = 20_000_000;
+/// Using IOMUX pins (GPIO10/11/12) for optimal high-speed performance.
+/// Note: Exceeds datasheet spec - test stability thoroughly. Use 20_000_000 for safe mode.
+pub const DISPLAY_SPI_FREQUENCY_HZ: u32 = 23_000_000;
 
 // === Waveform Visualization ===
 
 /// Circular buffer: 1024 samples (8× display width), ~2KB RAM.
 pub const WAVEFORM_BUFFER_SIZE: usize = (DISPLAY_WIDTH as usize) * 8;
 
-/// Oscilloscope zoom (time/div): 20ms (tight), 50ms (balanced), 100ms (wide), 200ms+ (zoomed out).
+/// Oscilloscope zoom (time/div): 20ms shows ~4 cycles of 220Hz sine (clean), 50ms (wide), 100ms+ (too zoomed out).
 /// Smaller = waveform appears wider/slower. Independent of refresh rate.
-pub const WAVEFORM_TIME_WINDOW_MS: u32 = 200;
+pub const WAVEFORM_TIME_WINDOW_MS: u32 = 20;
 
 /// Decimation factor: fixed rate ensuring >= 1 sample/pixel at TIME_WINDOW.
 /// Independent of refresh rate for consistent zoom across all configurations.
@@ -255,10 +257,6 @@ pub const WAVEFORM_DECIMATION_FACTOR: u32 = {
     let min_decimated_rate_needed = (DISPLAY_WIDTH * 1000) / WAVEFORM_TIME_WINDOW_MS;
     SAMPLE_RATE / min_decimated_rate_needed
 };
-
-/// SPSC queue capacity (power-of-2 for optimal heapless performance).
-/// Increased to 8 for debugging (was 2)
-pub const WAVEFORM_QUEUE_CAPACITY: usize = 8;
 
 /// Samples per pixel (uses decimated rate, not raw 44.1kHz).
 /// Derived from TIME_WINDOW_MS, independent of refresh rate.
@@ -271,21 +269,3 @@ pub const WAVEFORM_SAMPLES_PER_PIXEL: f32 =
 /// Ensures scroll velocity perfectly matches audio production at any refresh rate.
 pub const WAVEFORM_SCROLL_RATE: f32 =
     (SAMPLE_RATE / WAVEFORM_DECIMATION_FACTOR) as f32 / DISPLAY_REFRESH_RATE_HZ as f32;
-
-/// Safety margin: ensures full TIME_WINDOW is readable without hitting write pointer.
-/// Window samples (~147) + generous margin for safety.
-pub const WAVEFORM_SAFE_DISTANCE: usize = {
-    let window_samples = ((SAMPLE_RATE / WAVEFORM_DECIMATION_FACTOR) as f32
-        * WAVEFORM_TIME_WINDOW_MS as f32
-        / 1000.0) as usize;
-    window_samples + 32
-};
-
-/// Fixed-point (16.16 format) samples per display frame.
-/// At 120 Hz: 882 Hz / 120 Hz = 7.35 samples/frame → 481,689 in 16.16 fixed-point.
-/// Used by accumulator to send waveform data at exactly display refresh rate.
-/// Automatically adapts when DISPLAY_REFRESH_RATE_HZ changes (30/60/120 Hz).
-pub const WAVEFORM_SAMPLES_PER_FRAME_FIXED: u32 = (((SAMPLE_RATE / WAVEFORM_DECIMATION_FACTOR)
-    as f32
-    / DISPLAY_REFRESH_RATE_HZ as f32)
-    * 65536.0) as u32;

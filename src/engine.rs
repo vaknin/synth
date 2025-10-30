@@ -1,19 +1,17 @@
 //! Engine module: manages oscillators, processes messages, renders audio.
 
-use crate::config::{
-    MASTER_GAIN, WAVEFORM_BUFFER_SIZE, WAVEFORM_DECIMATION_FACTOR, WAVEFORM_SAMPLES_PER_FRAME_FIXED,
-};
+use crate::config::{MASTER_GAIN, WAVEFORM_BUFFER_SIZE, WAVEFORM_DECIMATION_FACTOR};
 use crate::filter::MoogLadderFilter;
 use crate::lfo::LFO;
-use crate::message::{Message, WaveformData};
+use crate::message::Message;
 use crate::oscillator::{Oscillator, Waveform};
 use crate::slew::Slew;
-use crate::{AudioStream, ChannelReceiver, WaveformProducer, I16_MAX_F32};
+use crate::{AudioStream, ChannelReceiver, WaveformSignal, I16_MAX_F32};
 
 /// Waveform capture state for oscilloscope visualization.
 ///
 /// Captures every Nth audio sample (decimation) for display on OLED.
-/// Sends to display at exact refresh rate using fixed-point accumulator.
+/// Sends to display via Signal (overwrites previous - latest-value semantics).
 struct WaveformCapture {
     /// Sample buffer (1024 i16 samples)
     buffer: [i16; WAVEFORM_BUFFER_SIZE],
@@ -24,8 +22,8 @@ struct WaveformCapture {
     /// Current write position in buffer (0-1023)
     write_index: usize,
 
-    /// Fixed-point accumulator (16.16) for rate-matched sending
-    send_accumulator: u32,
+    /// Frame counter for periodic sends (every N decimated samples)
+    send_counter: u32,
 }
 
 impl WaveformCapture {
@@ -34,7 +32,7 @@ impl WaveformCapture {
             buffer: [0; WAVEFORM_BUFFER_SIZE],
             decimation_counter: 0,
             write_index: 0,
-            send_accumulator: 0,
+            send_counter: 0,
         }
     }
 }
@@ -66,20 +64,8 @@ pub struct Engine {
     /// Waveform capture state for oscilloscope display
     waveform_capture: WaveformCapture,
 
-    /// SPSC producer for sending waveform data to display (Core 0 → Core 1)
-    waveform_producer: WaveformProducer,
-
-    /// Profiling: accumulated statistics (only compiled with 'profile' feature)
-    #[cfg(feature = "profile")]
-    profile_stats: ProfileStats,
-}
-
-#[cfg(feature = "profile")]
-struct ProfileStats {
-    buffer_count: u32,
-    total_micros: u64,
-    min_micros_per_sample: u64,
-    max_micros_per_sample: u64,
+    /// Signal for sending waveform data to display (Core 0 → Core 1)
+    waveform_signal: &'static WaveformSignal,
 }
 
 impl Engine {
@@ -87,15 +73,17 @@ impl Engine {
     ///
     /// # Arguments
     /// * `receiver` - Embassy channel receiver for control messages
-    /// * `waveform_producer` - SPSC producer for sending waveform data to display
+    /// * `waveform_signal` - Signal for sending waveform data to display
     ///
     /// # Returns
-    /// Engine with single sine oscillator at 110Hz (A2), always on at full level.
-    pub fn new(receiver: ChannelReceiver, waveform_producer: WaveformProducer) -> Self {
+    /// Engine with single sine oscillator at 220Hz (A3), always on at full level.
+    pub fn new(receiver: ChannelReceiver, waveform_signal: &'static WaveformSignal) -> Self {
         // Single sine oscillator configured as drone (220Hz A3, full level)
         let mut oscillator = Oscillator::new(Waveform::Sine);
         oscillator.set_frequency(220.0); // A3 note (220Hz)
         oscillator.set_level(1.0); // Always on, full volume
+
+        log::info!("Engine::new() - 220Hz sine oscillator initialized");
 
         Self {
             oscillator,
@@ -117,14 +105,7 @@ impl Engine {
             base_cutoff: crate::config::FILTER_CUTOFF_MIN,
             lfo_cutoff_range: 0.0, // LFO disabled - no modulation applied
             waveform_capture: WaveformCapture::new(),
-            waveform_producer,
-            #[cfg(feature = "profile")]
-            profile_stats: ProfileStats {
-                buffer_count: 0,
-                total_micros: 0,
-                min_micros_per_sample: u64::MAX,
-                max_micros_per_sample: 0,
-            },
+            waveform_signal,
         }
     }
 
@@ -185,13 +166,20 @@ impl Engine {
     /// - AUDIO RATE (44.1kHz): Generate samples with audio-rate smoothing
     #[inline]
     async fn render(&mut self, audio_stream: &mut AudioStream) {
-        #[cfg_attr(not(feature = "profile"), allow(unused_variables))]
+        // DIAGNOSTIC: Disabled for display timing test
+        // #[cfg(not(feature = "profile"))]
+        // {
+        //     static mut FIRST_RENDER: bool = true;
+        //     unsafe {
+        //         if FIRST_RENDER {
+        //             FIRST_RENDER = false;
+        //             log::info!("Audio: render() called, awaiting I2S DMA buffer...");
+        //         }
+        //     }
+        // }
+
         let bytes_written = audio_stream
             .push_with(|buffer| {
-                // DIAGNOSTIC: Measure CPU time INSIDE push_with (excludes DMA waiting)
-                #[cfg(feature = "profile")]
-                let start = embassy_time::Instant::now();
-
                 if buffer.len() < 4 {
                     return 0;
                 }
@@ -224,32 +212,20 @@ impl Engine {
                         // Write to circular buffer (1024 samples)
                         self.waveform_capture.buffer[self.waveform_capture.write_index] = output;
                         self.waveform_capture.write_index += 1;
+                        self.waveform_capture.send_counter += 1;
 
-                        // Accumulator-based send: match display refresh rate exactly (prevents queue overflow)
-                        // Add 1.0 sample in 16.16 fixed-point format
-                        self.waveform_capture.send_accumulator += 1 << 16;
+                        // Send periodically: every ~7 decimated samples (matches 30Hz refresh)
+                        // At 882 Hz decimated / 30 Hz display ≈ 29 samples/frame
+                        // Send more frequently for lower latency (every ~7 samples = ~127 Hz)
+                        const SEND_INTERVAL: u32 = 7;
+                        if self.waveform_capture.send_counter >= SEND_INTERVAL {
+                            self.waveform_capture.send_counter = 0;
 
-                        // Send when we've accumulated enough samples for one display frame
-                        // At 120 Hz: 7.35 samples/frame → sends exactly 120 times/second
-                        if self.waveform_capture.send_accumulator >= WAVEFORM_SAMPLES_PER_FRAME_FIXED {
-                            self.waveform_capture.send_accumulator -= WAVEFORM_SAMPLES_PER_FRAME_FIXED;
-
-                            let data = WaveformData {
-                                samples: self.waveform_capture.buffer,
-                                write_index: self.waveform_capture.write_index,
-                            };
-                            // enqueue() returns Err if full - should never happen with rate-matched sending
-                            match self.waveform_producer.enqueue(data) {
-                                Ok(_) => {
-                                    #[cfg(feature = "profile")]
-                                    if self.profile_stats.buffer_count % 172 == 0 {
-                                        log::info!("Waveform sent: write_index={}", self.waveform_capture.write_index);
-                                    }
-                                }
-                                Err(_) => {
-                                    log::warn!("Waveform queue full!");
-                                }
-                            }
+                            // DISABLED for display timing test
+                            // let data = WaveformData {
+                            //     samples: self.waveform_capture.buffer,
+                            // };
+                            // self.waveform_signal.signal(data);
                         }
 
                         // Wrap around at buffer size (circular buffer)
@@ -262,44 +238,19 @@ impl Engine {
 
                 let bytes_written = buffer.len() - (buffer.len() % 4);
 
-                // DIAGNOSTIC: Accumulate performance metrics (log only every ~1 second)
-                #[cfg(feature = "profile")]
-                {
-                    let elapsed = embassy_time::Instant::now() - start;
-                    let samples = bytes_written / 4;
-
-                    if samples > 0 {
-                        let micros_per_sample = elapsed.as_micros() / samples as u64;
-
-                        // Accumulate stats
-                        self.profile_stats.buffer_count += 1;
-                        self.profile_stats.total_micros += elapsed.as_micros();
-                        self.profile_stats.min_micros_per_sample =
-                            self.profile_stats.min_micros_per_sample.min(micros_per_sample);
-                        self.profile_stats.max_micros_per_sample =
-                            self.profile_stats.max_micros_per_sample.max(micros_per_sample);
-
-                        // Log every 172 buffers (~1 second at 44.1kHz with 256 samples/buffer)
-                        if self.profile_stats.buffer_count >= 172 {
-                            let avg_micros_per_sample =
-                                self.profile_stats.total_micros / (self.profile_stats.buffer_count as u64 * samples as u64);
-
-                            log::info!(
-                                "CPU: avg={} us/sample, min={} us/sample, max={} us/sample ({} buffers)",
-                                avg_micros_per_sample,
-                                self.profile_stats.min_micros_per_sample,
-                                self.profile_stats.max_micros_per_sample,
-                                self.profile_stats.buffer_count
-                            );
-
-                            // Reset stats
-                            self.profile_stats.buffer_count = 0;
-                            self.profile_stats.total_micros = 0;
-                            self.profile_stats.min_micros_per_sample = u64::MAX;
-                            self.profile_stats.max_micros_per_sample = 0;
-                        }
-                    }
-                }
+                // DIAGNOSTIC: Disabled for display timing test
+                // #[cfg(not(feature = "profile"))]
+                // {
+                //     static mut DIAG_COUNTER: u32 = 0;
+                //     unsafe {
+                //         DIAG_COUNTER += 1;
+                //         if DIAG_COUNTER >= 172 {
+                //             DIAG_COUNTER = 0;
+                //             log::info!("Audio: sample={}, write_idx={}",
+                //                 last_sample_i16, self.waveform_capture.write_index);
+                //         }
+                //     }
+                // }
 
                 bytes_written
             })

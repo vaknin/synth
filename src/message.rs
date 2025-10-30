@@ -15,20 +15,15 @@ pub enum Message {
 
 /// Waveform data for oscilloscope-style display visualization.
 ///
-/// Contains 256 audio samples captured via decimation (every 11th sample at 44.1kHz).
-/// Each buffer represents ~5.8ms of audio, sent from Engine (Core 0) to Display (Core 1).
+/// Contains 1024 audio samples captured via decimation (every 50th sample at 44.1kHz).
+/// Sent from Engine (Core 0) to Display (Core 1) via Embassy Signal (latest-value semantics).
 ///
-/// Overlapping window strategy: Buffers are sent every 128 samples (50% overlap) to provide
-/// smooth scrolling with phase continuity. The `write_index` field indicates where the next
-/// sample will be written, allowing the display to extract the most recent 128 samples.
+/// Display maintains its own read pointer for smooth time-based scrolling independent of
+/// audio engine write position. Signal provides complete buffer snapshot on every update.
 ///
-/// Transfer mechanism: heapless::spsc::Queue (lock-free, atomic-only, ~15 cycles per operation)
+/// Transfer mechanism: Embassy Signal (lock-free, atomic-only, overwrites if not consumed)
 #[derive(Clone, Copy)]
 pub struct WaveformData {
-    /// Circular buffer of audio samples (newest samples before write_index)
+    /// Circular buffer of audio samples
     pub samples: [i16; WAVEFORM_BUFFER_SIZE],
-
-    /// Write index (0-255): position where next sample will be written.
-    /// Most recent 128 samples are at indices [(write_index - 128)..write_index] (with wraparound)
-    pub write_index: usize,
 }

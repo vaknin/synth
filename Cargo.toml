@@ -40,9 +40,12 @@ heapless = "0.9.1"
 micromath = { version = "2.1.0", default-features = false }
 paste = "1.0.15"
 embedded-graphics = "0.8.1"
+# ASYNC FORK with split-write fix (COMMENTED OUT):
 ssd1351 = { path = "crates/ssd1351-async", features = ["buffered"] }
-display-interface-spi = "0.5.0"
-embedded-hal-bus = { version = "0.3.0", features = ["async"] }
+# BLOCKING ORIGINAL (ACTIVE - testing):
+# ssd1351 = { version = "0.5.0", features = ["buffered"] }
+embassy-embedded-hal = "0.5.0"  # Match esp-hal's version to avoid trait conflicts
+embedded-hal-bus = "0.2.0"  # For wrapping SpiBus as SpiDevice
 
 [features]
 profile = []

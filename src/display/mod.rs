@@ -3,102 +3,103 @@
 pub mod task;
 
 use crate::config::{
-    DISPLAY_HEIGHT, DISPLAY_WIDTH, WAVEFORM_BUFFER_SIZE, WAVEFORM_SAFE_DISTANCE,
-    WAVEFORM_SAMPLES_PER_PIXEL, WAVEFORM_SCROLL_RATE,
+    DISPLAY_HEIGHT, DISPLAY_WIDTH, WAVEFORM_BUFFER_SIZE, WAVEFORM_SAMPLES_PER_PIXEL,
+    WAVEFORM_SCROLL_RATE,
 };
-use crate::message::WaveformData;
-use display_interface_spi::SPIInterface;
+// ASYNC VERSION imports
+use embassy_embedded_hal::shared_bus::asynch::spi::SpiDevice;
+use embassy_sync::{blocking_mutex::raw::NoopRawMutex, mutex::Mutex};
+use embassy_time::Delay;
 use embedded_graphics::{
     pixelcolor::Rgb565,
     prelude::*,
     primitives::{Line, PrimitiveStyle},
 };
-use embassy_time::Delay;
-use embedded_hal_bus::spi::ExclusiveDevice;
 use esp_hal::{gpio::Output, spi::master::SpiDmaBus};
+
+// ASYNC VERSION: Using async ssd1351 fork
 use ssd1351::{
     display_async::DisplayAsync,
     mode::GraphicsModeAsync,
+    prelude::SPIInterface,
     properties::{DisplayRotation, DisplaySize},
 };
+
 use static_cell::StaticCell;
 
 const FRAMEBUFFER_SIZE: usize = (DISPLAY_WIDTH * DISPLAY_HEIGHT * 2) as usize;
 static FRAMEBUFFER: StaticCell<[u8; FRAMEBUFFER_SIZE]> = StaticCell::new();
-type SpiDevice = ExclusiveDevice<SpiDmaBus<'static, esp_hal::Async>, Output<'static>, Delay>;
 
-/// SSD1351 OLED driver with oscilloscope rendering (async SPI with DMA).
+// ASYNC VERSION types
+type SpiBusType = Mutex<NoopRawMutex, SpiDmaBus<'static, esp_hal::Async>>;
+type SpiDeviceType = SpiDevice<'static, NoopRawMutex, SpiDmaBus<'static, esp_hal::Async>, Output<'static>>;
+
+/// SSD1351 OLED driver with oscilloscope rendering.
 pub struct DisplayDriver {
-    display: GraphicsModeAsync<SPIInterface<SpiDevice, Output<'static>>>,
-    scroll_position_samples: f32,
-    pub cached_waveform: WaveformData,
+    // ASYNC VERSION
+    display: GraphicsModeAsync<SPIInterface<SpiDeviceType, Output<'static>>>,
+    local_read_index: f32,
+    pub cached_waveform: [i16; WAVEFORM_BUFFER_SIZE],
 }
 
 impl DisplayDriver {
-    /// Initialize async display driver (converts SPI to async on THIS core, yields during init)
+    /// Initialize display driver - ASYNC VERSION
     ///
-    /// IMPORTANT: Accepts SPI in Blocking mode and converts to Async internally.
-    /// This ensures interrupt handlers are registered on the correct core (Core 1).
+    /// Converts blocking SPI to async and wraps in Embassy SpiDevice
     pub async fn new(
         spi: SpiDmaBus<'static, esp_hal::Blocking>,
         cs: Output<'static>,
         dc: Output<'static>,
         mut rst: Output<'static>,
     ) -> Self {
-        log::info!("DisplayDriver::new() - step 1: converting SPI to async...");
-        // Convert to Async mode on THIS core (Core 1) - registers interrupt handler here
+        // ASYNC VERSION
+        log::info!("Converting SPI to async mode on Core 1...");
         let spi_async = spi.into_async();
-        log::info!("DisplayDriver::new() - step 2: SPI async conversion complete");
-
-        log::info!("DisplayDriver::new() - step 3: initializing framebuffer...");
-        let framebuffer = FRAMEBUFFER.init([0u8; FRAMEBUFFER_SIZE]);
-        log::info!("DisplayDriver::new() - step 4: creating SPI device...");
-        let spi_device = ExclusiveDevice::new(spi_async, cs, Delay).expect("Failed to create SPI device");
-        log::info!("DisplayDriver::new() - step 5: creating SPI interface...");
+        log::info!("Wrapping SPI bus in Mutex for embassy SpiDevice...");
+        static SPI_BUS: StaticCell<SpiBusType> = StaticCell::new();
+        let spi_bus = SPI_BUS.init(Mutex::new(spi_async));
+        log::info!("Creating embassy SpiDevice with CS pin...");
+        let spi_device = SpiDevice::new(spi_bus, cs);
         let interface = SPIInterface::new(spi_device, dc);
 
-        log::info!("DisplayDriver::new() - step 6: creating DisplayAsync...");
-        // Create async display instance
+        log::info!("Initializing framebuffer...");
+        let framebuffer = FRAMEBUFFER.init([0u8; FRAMEBUFFER_SIZE]);
+
+        log::info!("Creating DisplayAsync...");
         let display_async = DisplayAsync::new(
             interface,
             DisplaySize::Display128x128,
             DisplayRotation::Rotate0,
         );
 
-        log::info!("DisplayDriver::new() - step 7: creating GraphicsModeAsync...");
+        log::info!("Creating GraphicsModeAsync with buffer...");
         let mut display = GraphicsModeAsync::new(display_async, framebuffer);
-        log::info!("DisplayDriver::new() - step 8: display objects created");
 
-        // Reset and initialize (async)
-        log::info!("Resetting display...");
-        match display.reset(&mut rst, &mut Delay) {
-            Ok(_) => log::info!("Display reset OK"),
-            Err(e) => log::error!("Display reset failed: {:?}", e),
+        log::info!("Resetting and initializing display...");
+        if let Err(e) = display.reset(&mut rst, &mut Delay) {
+            log::error!("Display reset failed: {:?}", e);
+            panic!("Display reset failed");
         }
-
-        log::info!("Initializing display...");
-        match display.init().await {
-            Ok(_) => log::info!("Display init OK"),
-            Err(e) => log::error!("Display init failed: {:?}", e),
+        if let Err(e) = display.init().await {
+            log::error!("Display init failed: {:?}", e);
+            panic!("Display init failed");
         }
+        log::info!("Display initialized successfully");
 
-        display.clear();
-        log::info!("Display cleared");
+        // Draw test pattern to RAM buffer, then flush
+        log::info!("Drawing test pattern (buffered)...");
+        use embedded_graphics::primitives::{PrimitiveStyleBuilder, Rectangle};
 
-        // Draw test pattern to verify display works
-        log::info!("Drawing test pattern...");
-        use embedded_graphics::primitives::{Rectangle, PrimitiveStyleBuilder};
-
-        // Draw border
         Rectangle::new(Point::new(0, 0), Size::new(DISPLAY_WIDTH, DISPLAY_HEIGHT))
-            .into_styled(PrimitiveStyleBuilder::new()
-                .stroke_color(Rgb565::RED)
-                .stroke_width(2)
-                .build())
+            .into_styled(
+                PrimitiveStyleBuilder::new()
+                    .stroke_color(Rgb565::RED)
+                    .stroke_width(2)
+                    .build(),
+            )
             .draw(&mut display)
             .ok();
 
-        // Draw X pattern
         Line::new(Point::new(0, 0), Point::new(127, 127))
             .into_styled(PrimitiveStyle::with_stroke(Rgb565::GREEN, 2))
             .draw(&mut display)
@@ -108,66 +109,123 @@ impl DisplayDriver {
             .draw(&mut display)
             .ok();
 
-        log::info!("Flushing test pattern...");
-        display.flush().await;
-        log::info!("Test pattern displayed - display hardware verified!");
-
-        // Clear for waveform rendering
-        display.clear();
+        log::info!("Flushing test pattern to display (async)...");
+        let start = embassy_time::Instant::now();
+        if let Err(e) = display.flush().await {
+            log::error!("Test pattern flush failed: {:?}", e);
+            panic!("Test pattern flush failed");
+        }
+        let duration = embassy_time::Instant::now() - start;
+        log::info!(
+            "ASYNC: Test pattern flush took {}ms",
+            duration.as_millis()
+        );
 
         Self {
             display,
-            scroll_position_samples: (WAVEFORM_BUFFER_SIZE / 2) as f32,
-            cached_waveform: WaveformData {
-                samples: [0; WAVEFORM_BUFFER_SIZE],
-                write_index: 0,
-            },
+            // Start at buffer beginning (same as audio write_index)
+            // Display scrolls at WAVEFORM_SCROLL_RATE to naturally lag behind write head
+            local_read_index: 0.0,
+            cached_waveform: [0; WAVEFORM_BUFFER_SIZE],
         }
     }
 
-    /// Oscilloscope rendering: average mode with connected lines (async).
+    /// Simple test animation: bouncing rectangle - ASYNC VERSION
+    pub async fn draw_test_animation(&mut self, frame: u32) {
+        // Log every frame for first 5, then periodically
+        if frame < 5 {
+            log::info!("Frame {}: Starting test animation", frame);
+        }
+
+        // Draw to RAM buffer (fast) - sync in buffered mode
+        self.display.clear(); // clear to black (only touches RAM)
+
+        use embedded_graphics::primitives::{PrimitiveStyleBuilder, Rectangle};
+
+        let x_pos = ((frame * 2) % DISPLAY_WIDTH) as i32;
+
+        Rectangle::new(Point::new(x_pos, 50), Size::new(20, 20))
+            .into_styled(
+                PrimitiveStyleBuilder::new()
+                    .fill_color(Rgb565::GREEN)
+                    .build(),
+            )
+            .draw(&mut self.display)
+            .ok();
+
+        // ASYNC flush
+        if frame < 5 {
+            log::info!("Frame {}: Calling async flush()...", frame);
+        }
+
+        let start = embassy_time::Instant::now();
+        if let Err(e) = self.display.flush().await {
+            log::error!("Frame {}: Flush failed: {:?}", frame, e);
+            panic!("Flush failed");
+        }
+        let duration = embassy_time::Instant::now() - start;
+
+        // Calculate effective SPI clock from timing
+        let duration_ms = duration.as_millis();
+        let bytes_transferred = FRAMEBUFFER_SIZE;
+        let effective_mhz = if duration_ms > 0 {
+            (bytes_transferred as u64 * 8) / (duration_ms * 1000)
+        } else {
+            0
+        };
+
+        if frame < 10 || frame % 30 == 0 {
+            log::info!(
+                "Frame {}: FLUSH completed: {}ms ({}KB) → {}MHz (expect 20MHz @ 13ms)",
+                frame,
+                duration_ms,
+                bytes_transferred / 1024,
+                effective_mhz
+            );
+        }
+    }
+
+    /// Oscilloscope rendering: average mode with connected lines.
     ///
-    /// Performance: Drawing to RAM ~10µs (sync), flush via DMA 13.1ms (async, yields CPU).
+    /// Performance: Drawing to RAM ~10µs (sync), flush via DMA.
+    /// ASYNC VERSION
     pub async fn draw_waveform(&mut self) {
         static mut FRAME_COUNT: u32 = 0;
+        static mut FLUSH_START_MS: u64 = 0;
 
         // Time-based scrolling: constant velocity matching production rate
-        self.scroll_position_samples += WAVEFORM_SCROLL_RATE;
+        self.local_read_index += WAVEFORM_SCROLL_RATE;
 
-        // Wrap scroll position at buffer boundary
-        if self.scroll_position_samples >= WAVEFORM_BUFFER_SIZE as f32 {
-            self.scroll_position_samples -= WAVEFORM_BUFFER_SIZE as f32;
+        // Wrap read position at buffer boundary
+        if self.local_read_index >= WAVEFORM_BUFFER_SIZE as f32 {
+            self.local_read_index -= WAVEFORM_BUFFER_SIZE as f32;
         }
 
         // Extract integer and fractional parts for smooth interpolation
-        let scroll_pos_int = self.scroll_position_samples as usize;
-        let scroll_frac = self.scroll_position_samples - scroll_pos_int as f32;
+        let scroll_pos_int = self.local_read_index as usize;
+        let scroll_frac = self.local_read_index - scroll_pos_int as f32;
 
-        // Safety: skip frame if not enough data ahead to safely read
-        let distance = if self.cached_waveform.write_index >= scroll_pos_int {
-            self.cached_waveform.write_index - scroll_pos_int
-        } else {
-            WAVEFORM_BUFFER_SIZE - scroll_pos_int + self.cached_waveform.write_index
-        };
-
+        // Periodic logging with sample inspection
         unsafe {
             FRAME_COUNT += 1;
             if FRAME_COUNT % 60 == 0 {
-                log::info!("draw_waveform: scroll_pos={}, write_idx={}, distance={}, safe_dist={}",
-                    scroll_pos_int, self.cached_waveform.write_index, distance, WAVEFORM_SAFE_DISTANCE);
+                // Sample a few values from the cached buffer to verify data
+                let s0 = self.cached_waveform[0];
+                let s256 = self.cached_waveform[256];
+                let s512 = self.cached_waveform[512];
+                let s768 = self.cached_waveform[768];
+                log::info!(
+                    "draw: read_idx={}, samples[0,256,512,768]=[{},{},{},{}]",
+                    scroll_pos_int,
+                    s0,
+                    s256,
+                    s512,
+                    s768
+                );
             }
         }
 
-        if distance < WAVEFORM_SAFE_DISTANCE {
-            unsafe {
-                if FRAME_COUNT % 60 == 0 {
-                    log::warn!("Skipping frame: insufficient data (distance={} < safe={})", distance, WAVEFORM_SAFE_DISTANCE);
-                }
-            }
-            return;
-        }
-
-        self.display.clear();
+        self.display.clear(); // clear to black (only touches RAM)
 
         let center_y = (DISPLAY_HEIGHT / 2) as i32;
         let scale = 64.0 / i16::MAX as f32;
@@ -198,8 +256,8 @@ impl DisplayDriver {
                 let idx_next = (idx + 1) % WAVEFORM_BUFFER_SIZE;
 
                 // Linear interpolation for smooth scrolling
-                let sample_a = self.cached_waveform.samples[idx] as f32;
-                let sample_b = self.cached_waveform.samples[idx_next] as f32;
+                let sample_a = self.cached_waveform[idx] as f32;
+                let sample_b = self.cached_waveform[idx_next] as f32;
                 let sample_interp = sample_a + (sample_b - sample_a) * scroll_frac;
 
                 sample_sum += sample_interp as i32;
@@ -236,7 +294,21 @@ impl DisplayDriver {
             }
         }
 
-        // Async flush: DMA transfer yields CPU for 13.1ms, pot task runs concurrently!
-        self.display.flush().await;
+        // Flush (ASYNC VERSION)
+        unsafe {
+            FLUSH_START_MS = embassy_time::Instant::now().as_millis();
+        }
+
+        if let Err(e) = self.display.flush().await {
+            log::error!("Waveform flush failed: {:?}", e);
+        }
+
+        unsafe {
+            FRAME_COUNT += 1;
+            if FRAME_COUNT % 60 == 0 {
+                let duration_ms = embassy_time::Instant::now().as_millis() - FLUSH_START_MS;
+                log::info!("Display flush: {}ms", duration_ms);
+            }
+        }
     }
 }

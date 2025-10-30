@@ -2,59 +2,48 @@
 
 use super::DisplayDriver;
 use crate::config::DISPLAY_REFRESH_RATE_HZ;
-use crate::WaveformConsumer;
+use crate::WaveformSignal;
 use embassy_time::{Duration, Ticker};
 use esp_hal::{gpio::Output, spi::master::SpiDmaBus};
 
 /// OLED refresh task: phase-locked scrolling with drift-free timing.
 ///
-/// IMPORTANT: Accepts SPI in Blocking mode and creates DisplayDriver on Core 1.
-/// This ensures async conversion and interrupt handler registration happen on Core 1.
+/// **CRITICAL**: Accepts blocking SPI created on Core 0, then converts to async on Core 1.
+/// This ensures DMA interrupts are properly bound to Core 1 where the async executor runs.
 #[embassy_executor::task]
 pub async fn display_task(
     spi: SpiDmaBus<'static, esp_hal::Blocking>,
     cs: Output<'static>,
     dc: Output<'static>,
     rst: Output<'static>,
-    mut waveform_consumer: WaveformConsumer,
+    _waveform_signal: &'static WaveformSignal,
 ) {
-    log::info!("Display task starting...");
+    log::info!("Display task starting on Core 1...");
 
-    // Create display driver on Core 1 (converts SPI to Async internally)
+    // Create display driver on Core 1 (converts blocking SPI to async here)
     let mut display = DisplayDriver::new(spi, cs, dc, rst).await;
     log::info!("Display initialized successfully");
 
     let mut ticker = Ticker::every(Duration::from_hz(DISPLAY_REFRESH_RATE_HZ as u64));
     let mut frame_count = 0u32;
-    let mut dequeue_count = 0u32;
 
-    log::info!("Display task entering main loop at {}Hz", DISPLAY_REFRESH_RATE_HZ);
+    log::info!(
+        "Display task entering main loop at {}Hz",
+        DISPLAY_REFRESH_RATE_HZ
+    );
 
     loop {
-        log::info!("Frame {} start", frame_count);
+        // Wait for next frame time (phase-locked to DISPLAY_REFRESH_RATE_HZ)
+        ticker.next().await;
 
-        // Update cached waveform data if available
-        if let Some(new_data) = waveform_consumer.dequeue() {
-            dequeue_count += 1;
-            display.cached_waveform = new_data;
-            log::info!("  Dequeued waveform #{}, write_index={}", dequeue_count, new_data.write_index);
-        } else {
-            log::warn!("  No waveform data available in queue");
-        }
-
-        // ALWAYS draw (async - yields during 13.1ms DMA flush)
-        log::info!("  Drawing waveform...");
-        display.draw_waveform().await;
-        log::info!("  Draw complete");
+        // Simple test: draw animated rectangle (no audio waveform)
+        display.draw_test_animation(frame_count).await;
 
         frame_count += 1;
-        if frame_count % 30 == 0 {
-            log::info!("=== Display stats: frame={}, dequeued={}, write_index={} ===",
-                frame_count, dequeue_count, display.cached_waveform.write_index);
-        }
 
-        // Wait for next tick (phase-locked, compensates for processing time)
-        log::info!("  Waiting for next tick...");
-        ticker.next().await;
+        // Log every 30 frames (1 second at 30 Hz)
+        if frame_count % 30 == 0 {
+            log::info!("Display test: frame={}", frame_count);
+        }
     }
 }

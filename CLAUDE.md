@@ -2,6 +2,28 @@
 
 Audio synthesizer with oscillators, filters, LFOs, and real-time OLED waveform visualization.
 
+# Current Status
+
+**✅ WORKING (2025-10-30):**
+- Async SPI + DMA on Core 0 (single-core test in `main.rs`)
+- Hardware/wiring verified correct
+- `ssd1351-async` crate working with Embassy `SpiDevice`
+- Test pattern renders successfully (13ms flush @ 20 MHz)
+
+**❌ BLOCKED:**
+- Cross-core async SPI (Core 0 → Core 1 transfer)
+  - Previously caused BusWriteError or LoadProhibited
+  - Root cause unknown - needs incremental debugging
+
+**Next Steps (incremental, one at a time):**
+1. Move async display to embassy task on Core 0 (still single-core)
+2. If #1 works: Enable dual-core with display task on Core 1
+3. If #2 works: Add I2S audio back on Core 0
+4. If #3 works: Add ADC + pot task on Core 1
+5. Restore full synthesizer functionality
+
+**Rule: If any step fails, revert to previous working state. Never advance two steps.**
+
 # Documentation
 
 **Architecture:**
@@ -13,18 +35,25 @@ Audio synthesizer with oscillators, filters, LFOs, and real-time OLED waveform v
 - Use `StaticCell<Stack<SIZE>>` for Core 1 stack
 - Cross-core communication:
   - Embassy Channel (MPSC): Pot messages (Core 1 → Core 0)
-  - heapless::spsc::Queue: Waveform data (Core 0 → Core 1)
+  - Embassy Signal: Waveform data (Core 0 → Core 1, latest-value semantics)
   - Pattern: Message-passing over shared mutable state
-  - Rate matching: Use 16.16 fixed-point accumulators to match producer/consumer rates exactly (prevents queue overflow, ensures smooth operation)
 
 **GPIO (Phase 1):**
 - I2S: GPIO35/36/37 (safe on N16R8)
 - Pots: GPIO1 (cutoff), GPIO2 (resonance)
 - Display: GPIO9-13 (SPI2, 20 MHz, SSD1351 128×128 OLED)
-  - Smooth scrolling: linear interpolation between adjacent samples using fractional scroll position
-  - Waveform send rate: 16.16 accumulator matches display refresh rate exactly (no queue overflow)
-  - Scroll rate auto-derived from DISPLAY_REFRESH_RATE_HZ (configurable: 30/60/120Hz)
+  - Display controls own read pointer (local_read_index), advances by WAVEFORM_SCROLL_RATE per frame
+  - **CRITICAL**: local_read_index MUST initialize to 0.0 (same as audio write_index start)
+    - Initializing to WAVEFORM_BUFFER_SIZE/2 causes display to read uninitialized zeros → straight line bug
+  - Smooth scrolling: linear interpolation between adjacent samples using fractional position
+  - Signal provides complete buffer snapshot (~127 Hz), display samples at refresh rate (30/60/120Hz configurable)
   - Zoom (TIME_WINDOW_MS) independent of refresh rate
+  - **DMA Configuration:**
+    - `dma_buffers!(4, 32768)` = minimal 4-byte RX, full 32KB TX buffer
+    - ESP-HAL SPI DMA limit: 32736 bytes/transfer (32 bytes less than 32KB)
+    - Framebuffer (128×128×2 = 32768 bytes) split into 32736 + 32 byte writes
+    - Split write has zero overhead: 13ms @ 20 MHz (async), 17ms @ 15 MHz (blocking)
+    - 40 MHz overclock: 7ms @ 37 MHz effective ⚡
 
 # Project Guidelines
 
@@ -46,3 +75,4 @@ Audio synthesizer with oscillators, filters, LFOs, and real-time OLED waveform v
 - Questions: Number them, attach recommendations (based on audio/hardware best practices)
 - Comments/docs: Minimal, concise, technical. No verbose explanations or marketing language
 - Config constants: All constants in `src/config.rs` must be derived from other constants where possible (no magic numbers). Ensure derivations remain valid when base constants change (e.g., DISPLAY_REFRESH_RATE_HZ is configurable)
+- Diagnostic logging: Use sparse logs (startup + every 1-2 sec) to avoid UART choking; frequent logs can overwhelm serial output
