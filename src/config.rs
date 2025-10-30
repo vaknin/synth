@@ -136,7 +136,6 @@ pub const ADC_POLL_INTERVAL_MS: u64 = 20;
 /// Number of ADC samples to average per reading (multisampling) for noise reduction.
 /// 9 samples provides √9 = 3× noise reduction for clean, stable readings.
 /// Combined with EMA filter (alpha=0.8) for maximum signal quality.
-/// IMPORTANT: poll_and_send() uses yield_now() between samples (not Timer::after).
 pub const ADC_MULTISAMPLING_COUNT: usize = 9;
 
 /// Reciprocal of ADC_MULTISAMPLING_COUNT for division elimination.

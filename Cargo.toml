@@ -48,6 +48,9 @@ ssd1351 = { path = "crates/ssd1351-async", features = ["buffered"] }
 embassy-embedded-hal = "0.5.0"  # Match esp-hal's version to avoid trait conflicts
 embedded-hal-bus = { version = "0.3", features = ["async"] }  # ExclusiveDevice for single-device SPI
 
+[patch.crates-io]
+esp-rtos = { path = "crates/esp-rtos-patched" }  # Fix dual-core ABBA deadlock in schedule_wake
+
 [features]
 profile = []
 

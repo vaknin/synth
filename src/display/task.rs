@@ -22,15 +22,9 @@ pub async fn display_test_task(
 
     let mut ticker = Ticker::every(Duration::from_hz(DISPLAY_REFRESH_RATE_HZ as u64));
 
-    let mut count = 0u32;
     loop {
         ticker.next().await;
         display.draw_test_animation().await;
-
-        count += 1;
-        if count % 90 == 0 {
-            log::info!("display alive: {}", count);
-        }
     }
 }
 

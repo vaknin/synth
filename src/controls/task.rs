@@ -56,16 +56,10 @@ pub async fn pot_task(
         Potentiometer::new(map_resonance),
     ];
 
-    let mut count = 0u32;
     loop {
         // Poll both pots (18 blocking ADC reads total, ~180µs)
         for (pot, pin) in pots.iter_mut().zip(pins.iter_mut()) {
             pot.poll_and_send(sender, pin, &mut adc_bus.adc).await;
-        }
-
-        count += 1;
-        if count % 100 == 0 {
-            log::info!("pot alive: {}", count);
         }
 
         Timer::after(Duration::from_millis(ADC_POLL_INTERVAL_MS)).await;
