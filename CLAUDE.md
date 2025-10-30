@@ -9,17 +9,15 @@ Audio synthesizer with oscillators, filters, LFOs, and real-time OLED waveform v
 - Hardware/wiring verified correct
 - Test pattern renders successfully (13ms flush @ 20 MHz)
 - **Step 1 COMPLETE**: Display task running as Embassy task on Core 0 ✅
-
-**🚧 IN PROGRESS:**
-- Step 2: Move display task to Core 1 (cross-core async SPI)
-  - Previously caused BusWriteError or LoadProhibited
-  - Root cause unknown - needs incremental debugging
+- **Step 2 COMPLETE**: Display task running on Core 1 (cross-core async SPI working!) ✅
+  - Key: `SpiDmaBus<Blocking>` is `Send`, `.into_async()` called ON Core 1
+  - Previous BusWriteError avoided by correct async binding
 
 **Next Steps (incremental, one at a time):**
 1. ~~Move async display to embassy task on Core 0 (still single-core)~~ ✅ DONE
-2. Enable dual-core with display task on Core 1
-3. If #2 works: Add I2S audio back on Core 0
-4. If #3 works: Add ADC + pot task on Core 1
+2. ~~Enable dual-core with display task on Core 1~~ ✅ DONE
+3. Add I2S audio back on Core 0
+4. Add ADC + pot task on Core 1
 5. Restore full synthesizer functionality
 
 **Rule: If any step fails, revert to previous working state. Never advance two steps.**

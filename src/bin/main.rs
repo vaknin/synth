@@ -34,7 +34,7 @@ async fn main(spawner: Spawner) {
     // Initialize logger at INFO level
     esp_println::logger::init_logger(log::LevelFilter::Info);
 
-    log::info!("=== ESP32-S3 Display Test - Step 1: Embassy Task on Core 0 ===");
+    log::info!("=== ESP32-S3 Display Test - Phase 2.2: Display on Core 1 ===");
 
     let peripherals = esp_hal::init(esp_hal::Config::default());
 
@@ -42,11 +42,11 @@ async fn main(spawner: Spawner) {
     let timer0 = TimerGroup::new(peripherals.TIMG0).timer0;
     esp_rtos::start(timer0);
 
-    // ========== EVERYTHING BELOW COMMENTED OUT FOR SIMPLE SPI TEST ==========
+    // ========== PHASE 2.1: ENABLE DUAL-CORE ==========
 
-    // // Setup software interrupts for dual-core RTOS
-    // let (software_interrupt_0, software_interrupt_1) =
-    //     hardware::setup_interrupts(peripherals.SW_INTERRUPT);
+    // Setup software interrupts for dual-core RTOS
+    let (software_interrupt_0, software_interrupt_1) =
+        hardware::setup_interrupts(peripherals.SW_INTERRUPT);
 
     // // MPSC Channel (thread-safe across cores)
     // let consumer = CHANNEL.receiver();
@@ -81,7 +81,10 @@ async fn main(spawner: Spawner) {
     //     peripherals.GPIO2, // Pot 1: Filter Resonance
     // );
 
-    // ========== STEP 1: SPAWN DISPLAY TASK ON CORE 0 ==========
+    // Extract CPU_CTRL FIRST before moving any other peripherals
+    let cpu_ctrl = peripherals.CPU_CTRL;
+
+    // ========== DISPLAY SETUP (Peripherals created on Core 0, moved to Core 1) ==========
 
     log::info!("Setting up SPI display...");
     let (spi, cs, dc, rst) = hardware::setup_spi_display(
@@ -95,68 +98,43 @@ async fn main(spawner: Spawner) {
     );
     log::info!("SPI display peripherals configured");
 
-    log::info!("Spawning display_test_task on Core 0...");
-    spawner
-        .spawn(synth::display::task::display_test_task(spi, cs, dc, rst))
-        .expect("Failed to spawn display task");
+    // ========== PHASE 2.2: START CORE 1 WITH DISPLAY TASK ==========
 
-    log::info!("Display task spawned successfully - running independently on Core 0");
+    // Initialize Core 1 stack (must happen after esp_rtos::start)
+    let app_core_stack = APP_CORE_STACK.init(Stack::new());
 
-    // Main task yields forever - display task runs in background
+    log::info!("Starting Core 1 (spawning display task)...");
+
+    // Start Core 1 (APP_CPU) with display task
+    esp_rtos::start_second_core(
+        cpu_ctrl,
+        software_interrupt_0,
+        software_interrupt_1,
+        app_core_stack,
+        move || {
+            // This closure runs on Core 1
+            use esp_rtos::embassy::Executor;
+            use static_cell::StaticCell;
+            static EXECUTOR: StaticCell<Executor> = StaticCell::new();
+
+            let executor = EXECUTOR.init(Executor::new());
+            executor.run(|spawner| {
+                log::info!("Core 1 executor started");
+
+                // Spawn display test task on Core 1 (converts blocking SPI to async on Core 1)
+                spawner
+                    .spawn(synth::display::task::display_test_task(spi, cs, dc, rst))
+                    .expect("Failed to spawn display task on Core 1");
+
+                log::info!("Core 1 display task spawned");
+            });
+        },
+    );
+
+    log::info!("Core 0 yielding - Core 1 running display task");
+
+    // Main task yields forever - display task runs on Core 1
     loop {
         embassy_time::Timer::after(embassy_time::Duration::from_secs(60)).await;
     }
-
-    // ========== DUAL-CORE CODE COMMENTED OUT ==========
-
-    // // Initialize Core 1 stack (must happen after esp_rtos::start)
-    // let app_core_stack = APP_CORE_STACK.init(Stack::new());
-
-    // log::info!("Starting Core 1 (ADC + Display tasks)...");
-
-    // // Start Core 1 (APP_CPU) for ADC polling + display rendering
-    // esp_rtos::start_second_core(
-    //     cpu_ctrl,
-    //     software_interrupt_0,
-    //     software_interrupt_1,
-    //     app_core_stack,
-    //     move || {
-    //         // This closure runs on Core 1 - ADC polling + display rendering
-    //         // Isolated from audio rendering on Core 0
-    //         use esp_rtos::embassy::Executor;
-    //         use static_cell::StaticCell;
-    //         static EXECUTOR: StaticCell<Executor> = StaticCell::new();
-
-    //         let executor = EXECUTOR.init(Executor::new());
-    //         executor.run(|spawner| {
-    //             log::info!("Core 1 executor started");
-
-    //             // Spawn pot task on Core 1
-    //             spawner
-    //                 .spawn(synth::controls::task::pot_task(producer, adc_bus, pins))
-    //                 .ok();
-
-    //             // Spawn display task on Core 1 (converts blocking SPI to async on Core 1)
-    //             spawner
-    //                 .spawn(synth::display::task::display_task(
-    //                     spi, cs, dc, rst, waveform_signal,
-    //                 ))
-    //                 .ok();
-
-    //             log::info!("Core 1 tasks spawned (pot + display)");
-    //         });
-    //     },
-    // );
-
-    // log::info!("Core 0 continuing with audio engine...");
-
-    // // Create synth engine on Core 0
-    // let mut engine = Engine::new(consumer, waveform_signal);
-
-    // log::info!("Engine initialized, starting audio loop...");
-
-    // // Main audio loop runs on Core 0 - zero interference from ADC/display on Core 1
-    // loop {
-    //     engine.stream_audio(&mut audio_stream).await;
-    // }
 }
