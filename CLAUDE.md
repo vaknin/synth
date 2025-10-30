@@ -16,8 +16,8 @@ Audio synthesizer with oscillators, filters, LFOs, and real-time OLED waveform v
 **Next Steps (incremental, one at a time):**
 1. ~~Move async display to embassy task on Core 0 (still single-core)~~ ✅ DONE
 2. ~~Enable dual-core with display task on Core 1~~ ✅ DONE
-3. Add I2S audio back on Core 0
-4. Add ADC + pot task on Core 1
+3. ~~Add ADC + pot task on Core 1~~ ✅ DONE
+4. Add I2S audio back on Core 0
 5. Restore full synthesizer functionality
 
 **Rule: If any step fails, revert to previous working state. Never advance two steps.**

@@ -3,7 +3,6 @@
 use crate::config::*;
 use crate::controls::CtrlSender;
 use crate::message::Message;
-use embassy_futures::yield_now;
 use log::warn;
 use micromath::F32Ext;
 
@@ -147,12 +146,10 @@ impl Potentiometer {
         adc: &mut crate::hardware::Adc1,
     ) {
         // 1. Multisample: read N samples into internal buffer
-        // Yield between samples to avoid starving display_task (cooperative scheduling)
-        // CRITICAL: Use yield_now() not Timer::after(0) - ESP32 TIMG has only 2 timer slots
+        // No yields here - blocking is brief (~90µs for 9 samples)
+        // Single yield at task level (after both pots) prevents executor starvation
         for sample in self.samples.iter_mut() {
             *sample = pin.read_blocking(adc);
-            // Pure executor yield - bypasses timer queue entirely
-            yield_now().await;
         }
 
         // 2. Average samples (multisampling reduces noise)

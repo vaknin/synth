@@ -17,30 +17,19 @@ pub async fn display_test_task(
     dc: Output<'static>,
     rst: Output<'static>,
 ) {
-    log::info!("Display test task starting...");
-
     // Create display driver (converts blocking SPI to async)
     let mut display = DisplayDriver::new(spi, cs, dc, rst).await;
-    log::info!("Display initialized successfully");
 
     let mut ticker = Ticker::every(Duration::from_hz(DISPLAY_REFRESH_RATE_HZ as u64));
 
-    log::info!(
-        "Display task entering animation loop at {}Hz",
-        DISPLAY_REFRESH_RATE_HZ
-    );
-
-    // Diagnostic: log every ~2 seconds to verify task is running
-    let mut frame_count = 0u32;
-
+    let mut count = 0u32;
     loop {
         ticker.next().await;
         display.draw_test_animation().await;
 
-        frame_count += 1;
-        if frame_count % 90 == 0 {
-            // Log every 90 frames = every 2 seconds (90 / 45Hz)
-            log::info!("display_task: {} frames rendered", frame_count);
+        count += 1;
+        if count % 90 == 0 {
+            log::info!("display alive: {}", count);
         }
     }
 }

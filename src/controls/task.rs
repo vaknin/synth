@@ -49,27 +49,23 @@ pub async fn pot_task(
     gpio2: esp_hal::peripherals::GPIO2<'static>,
 ) {
     // Initialize ADC inside task (runs on Core 1 task stack, not executor stack)
-    log::info!("pot_task: Initializing ADC on Core 1...");
     let (mut adc_bus, mut pins) = hardware::setup_adc(adc1, gpio1, gpio2);
-    log::info!("pot_task: ADC initialized");
 
     let mut pots = [
         Potentiometer::new(map_cutoff),
         Potentiometer::new(map_resonance),
     ];
 
-    // Diagnostic: log every ~2 seconds to verify task is running
-    let mut poll_count = 0u32;
-
+    let mut count = 0u32;
     loop {
+        // Poll both pots (18 blocking ADC reads total, ~180µs)
         for (pot, pin) in pots.iter_mut().zip(pins.iter_mut()) {
             pot.poll_and_send(sender, pin, &mut adc_bus.adc).await;
         }
 
-        poll_count += 1;
-        if poll_count % 100 == 0 {
-            // Log every 100 cycles = every 2 seconds (100 × 20ms)
-            log::info!("pot_task: {} polls completed", poll_count);
+        count += 1;
+        if count % 100 == 0 {
+            log::info!("pot alive: {}", count);
         }
 
         Timer::after(Duration::from_millis(ADC_POLL_INTERVAL_MS)).await;
