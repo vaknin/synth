@@ -236,11 +236,12 @@ pub const DISPLAY_WIDTH: u32 = 128;
 pub const DISPLAY_HEIGHT: u32 = 128;
 
 /// Display refresh rate
-pub const DISPLAY_REFRESH_RATE_HZ: u32 = 60;
+pub const DISPLAY_REFRESH_RATE_HZ: u32 = 45;
 
 /// Using IOMUX pins (GPIO10/11/12) for optimal high-speed performance.
 /// Note: Exceeds datasheet spec - test stability thoroughly. Use 20_000_000 for safe mode.
-pub const DISPLAY_SPI_FREQUENCY_HZ: u32 = 23_000_000;
+/// 23Mhz seems to work fine.
+pub const DISPLAY_SPI_FREQUENCY_HZ: u32 = 22_500_000;
 
 // === Waveform Visualization ===
 

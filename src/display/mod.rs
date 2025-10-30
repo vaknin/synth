@@ -49,8 +49,8 @@ impl DisplayDriver {
         let spi_async = spi.into_async();
 
         log::info!("Creating ExclusiveDevice with CS pin...");
-        let spi_device = ExclusiveDevice::new(spi_async, cs, Delay)
-            .expect("Failed to create SPI device");
+        let spi_device =
+            ExclusiveDevice::new(spi_async, cs, Delay).expect("Failed to create SPI device");
         let interface = SPIInterface::new(spi_device, dc);
 
         log::info!("Initializing framebuffer...");

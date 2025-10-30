@@ -5,19 +5,19 @@ Audio synthesizer with oscillators, filters, LFOs, and real-time OLED waveform v
 # Current Status
 
 **✅ WORKING (2025-10-30):**
-- Async SPI + DMA on Core 0 (single-core test in `main.rs`)
+- Async SPI + DMA with `embedded-hal-bus::ExclusiveDevice` (idiomatic single-device pattern)
 - Hardware/wiring verified correct
-- `ssd1351-async` crate with `embedded-hal-bus::ExclusiveDevice` (idiomatic single-device pattern)
 - Test pattern renders successfully (13ms flush @ 20 MHz)
+- **Step 1 COMPLETE**: Display task running as Embassy task on Core 0 ✅
 
-**❌ BLOCKED:**
-- Cross-core async SPI (Core 0 → Core 1 transfer)
+**🚧 IN PROGRESS:**
+- Step 2: Move display task to Core 1 (cross-core async SPI)
   - Previously caused BusWriteError or LoadProhibited
   - Root cause unknown - needs incremental debugging
 
 **Next Steps (incremental, one at a time):**
-1. Move async display to embassy task on Core 0 (still single-core)
-2. If #1 works: Enable dual-core with display task on Core 1
+1. ~~Move async display to embassy task on Core 0 (still single-core)~~ ✅ DONE
+2. Enable dual-core with display task on Core 1
 3. If #2 works: Add I2S audio back on Core 0
 4. If #3 works: Add ADC + pot task on Core 1
 5. Restore full synthesizer functionality

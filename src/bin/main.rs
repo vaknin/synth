@@ -30,11 +30,11 @@ static WAVEFORM_SIGNAL: WaveformSignal = Signal::new();
 static APP_CORE_STACK: StaticCell<Stack<APP_CORE_STACK_SIZE>> = StaticCell::new();
 
 #[esp_rtos::main]
-async fn main(_spawner: Spawner) {
+async fn main(spawner: Spawner) {
     // Initialize logger at INFO level
     esp_println::logger::init_logger(log::LevelFilter::Info);
 
-    log::info!("=== ESP32-S3 SPI Display Test (Single-Core) ===");
+    log::info!("=== ESP32-S3 Display Test - Step 1: Embassy Task on Core 0 ===");
 
     let peripherals = esp_hal::init(esp_hal::Config::default());
 
@@ -81,9 +81,9 @@ async fn main(_spawner: Spawner) {
     //     peripherals.GPIO2, // Pot 1: Filter Resonance
     // );
 
-    // ========== SIMPLE SPI TEST ON CORE 0 ==========
+    // ========== STEP 1: SPAWN DISPLAY TASK ON CORE 0 ==========
 
-    log::info!("Setting up SPI display (Core 0)...");
+    log::info!("Setting up SPI display...");
     let (spi, cs, dc, rst) = hardware::setup_spi_display(
         peripherals.SPI2,
         peripherals.DMA_CH1,
@@ -95,21 +95,16 @@ async fn main(_spawner: Spawner) {
     );
     log::info!("SPI display peripherals configured");
 
-    use synth::display::DisplayDriver;
-    log::info!("Initializing DisplayDriver...");
-    let mut display = DisplayDriver::new(spi, cs, dc, rst).await;
-    log::info!("DisplayDriver ready");
+    log::info!("Spawning display_test_task on Core 0...");
+    spawner
+        .spawn(synth::display::task::display_test_task(spi, cs, dc, rst))
+        .expect("Failed to spawn display task");
 
-    log::info!("Starting animated test...");
-    use embassy_time::{Duration, Ticker};
+    log::info!("Display task spawned successfully - running independently on Core 0");
 
-    let mut ticker = Ticker::every(Duration::from_hz(DISPLAY_REFRESH_RATE_HZ.into()));
-
-    log::info!("Entering animation loop ({}Hz)...", DISPLAY_REFRESH_RATE_HZ);
-
+    // Main task yields forever - display task runs in background
     loop {
-        ticker.next().await;
-        display.draw_test_animation().await;
+        embassy_time::Timer::after(embassy_time::Duration::from_secs(60)).await;
     }
 
     // ========== DUAL-CORE CODE COMMENTED OUT ==========
