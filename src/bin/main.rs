@@ -128,7 +128,13 @@ async fn main(spawner: Spawner) {
                 // Spawn waveform display task on Core 1 (converts blocking SPI to async on Core 1)
                 log::info!("Spawning display_task...");
                 spawner
-                    .spawn(synth::display::task::display_task(spi, cs, dc, rst, waveform_signal))
+                    .spawn(synth::display::task::display_task(
+                        spi,
+                        cs,
+                        dc,
+                        rst,
+                        waveform_signal,
+                    ))
                     .expect("Failed to spawn display task on Core 1");
                 log::info!("display_task spawned");
 

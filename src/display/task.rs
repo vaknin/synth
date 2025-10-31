@@ -32,7 +32,7 @@ pub async fn display_test_task(
 /// OLED refresh task with waveform rendering (for dual-core operation).
 ///
 /// Reads waveform data from Watch and renders oscilloscope view.
-/// Uses non-blocking try_changed() to avoid frame timing issues.
+/// Uses select() to wait for either ticker or new waveform data.
 #[embassy_executor::task]
 pub async fn display_task(
     spi: SpiDmaBus<'static, esp_hal::Blocking>,
@@ -59,7 +59,7 @@ pub async fn display_task(
     );
 
     loop {
-        // Wait for EITHER ticker OR new waveform (fixed frame timing!)
+        // Wait for EITHER ticker OR new waveform
         match select(ticker.next(), waveform_rx.changed()).await {
             Either::First(_) => {
                 // Ticker fired - render using cached waveform
@@ -70,5 +70,13 @@ pub async fn display_task(
                 display.cached_waveform.copy_from_slice(&waveform.samples);
             }
         }
+
+        // ATTEMPTED FIX (commented out - causes freeze?):
+        // Wait for next frame tick, then consume all pending waveforms
+        // ticker.next().await;
+        // while let Some(waveform) = waveform_rx.try_changed() {
+        //     display.cached_waveform.copy_from_slice(&waveform.samples);
+        // }
+        // display.draw_waveform().await;
     }
 }

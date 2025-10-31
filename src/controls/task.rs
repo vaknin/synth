@@ -57,11 +57,13 @@ pub async fn pot_task(
     ];
 
     loop {
-        // Poll both pots (18 blocking ADC reads total, ~180µs)
+        // Poll both pots with explicit yields
+        // Yielding after ADC reads prevents starving display_task on Core 1 executor
         for (pot, pin) in pots.iter_mut().zip(pins.iter_mut()) {
-            pot.poll_and_send(sender, pin, &mut adc_bus.adc).await;
+            pot.poll_and_send_yielding(sender, pin, &mut adc_bus.adc).await;
         }
 
+        // Timer::after is also a yield point - display_task can run here
         Timer::after(Duration::from_millis(ADC_POLL_INTERVAL_MS)).await;
     }
 }

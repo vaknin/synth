@@ -146,8 +146,6 @@ impl Potentiometer {
         adc: &mut crate::hardware::Adc1,
     ) {
         // 1. Multisample: read N samples into internal buffer
-        // No yields here - blocking is brief (~90µs for 9 samples)
-        // Single yield at task level (after both pots) prevents executor starvation
         for sample in self.samples.iter_mut() {
             *sample = pin.read_blocking(adc);
         }
@@ -174,6 +172,52 @@ impl Potentiometer {
                 warn!("Pot message dropped (queue full): {:?}", e);
             }
         }
+    }
+
+    /// Poll and send with explicit yields - prevents blocking display_task on Core 1.
+    ///
+    /// Returns Some(Message) if the message was dropped due to full queue.
+    ///
+    /// KEY: Yields after ADC multisampling so display_task can maintain frame timing.
+    /// Embassy executes tasks cooperatively on Core 1 - yield = "let other tasks run now".
+    pub async fn poll_and_send_yielding(
+        &mut self,
+        sender: CtrlSender,
+        pin: &mut crate::hardware::AnyAdcPin,
+        adc: &mut crate::hardware::Adc1,
+    ) -> Option<Message> {
+        // 1. Multisample: read N samples into internal buffer
+        // Blocking operation: 9 × ~10µs = ~90µs total
+        for sample in self.samples.iter_mut() {
+            *sample = pin.read_blocking(adc);
+        }
+
+        // YIELD: Allow display_task (30Hz, 33ms deadline) to run after blocking ADC reads
+        // This prevents pot_task from starving display_task on the shared Core 1 executor
+        embassy_futures::yield_now().await;
+
+        // 2. Average samples
+        let sum: u32 = self.samples.iter().map(|&s| s as u32).sum();
+        let avg = sum as f32 * ADC_MULTISAMPLING_COUNT_RECIPROCAL;
+
+        // 3. EMA filtering
+        self.filtered = self.filtered * self.alpha + avg * (1.0 - self.alpha);
+
+        // 4. Normalize
+        let normalized = (self.filtered * POT_MAX_RECIPROCAL).clamp(0.0, 1.0);
+
+        // 5. Deadband check and send
+        if (normalized - self.last_sent).abs() >= POT_CHANGE_THRESHOLD {
+            self.last_sent = normalized;
+            let msg = (self.map_fn)(normalized);
+
+            // Try to send, return the message if it was dropped
+            if let Err(_) = sender.try_send(msg) {
+                return Some(msg);
+            }
+        }
+
+        None
     }
 }
 

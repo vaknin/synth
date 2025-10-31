@@ -243,12 +243,12 @@ pub const DISPLAY_WIDTH: u32 = 128;
 pub const DISPLAY_HEIGHT: u32 = 128;
 
 /// Display refresh rate (supported range: 15-60Hz, optimal: 30-45Hz)
-pub const DISPLAY_REFRESH_RATE_HZ: u32 = 30;
+pub const DISPLAY_REFRESH_RATE_HZ: u32 = 15;
 
 /// Using IOMUX pins (GPIO10/11/12) for optimal high-speed performance.
 /// Note: Exceeds datasheet spec - test stability thoroughly. Use 20_000_000 for safe mode.
-/// 23Mhz seems to work fine.
-pub const DISPLAY_SPI_FREQUENCY_HZ: u32 = 22_500_000;
+/// 23Mhz seems to work fine and around the limit, 23.5mhz is corrupted
+pub const DISPLAY_SPI_FREQUENCY_HZ: u32 = 23_250_000;
 
 // === Waveform Visualization ===
 

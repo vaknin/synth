@@ -3,14 +3,16 @@
 pub mod task;
 
 use crate::config::{
-    DISPLAY_HEIGHT, DISPLAY_WIDTH, WAVEFORM_BUFFER_SIZE, WAVEFORM_SAMPLES_PER_PIXEL,
-    WAVEFORM_SCROLL_RATE,
+    DISPLAY_HEIGHT, DISPLAY_REFRESH_RATE_HZ, DISPLAY_WIDTH, WAVEFORM_BUFFER_SIZE,
+    WAVEFORM_SAMPLES_PER_PIXEL, WAVEFORM_SCROLL_RATE,
 };
 use embassy_time::Delay;
 use embedded_graphics::{
+    mono_font::{ascii::FONT_6X9, MonoTextStyle},
     pixelcolor::Rgb565,
     prelude::*,
     primitives::{Line, PrimitiveStyle},
+    text::Text,
 };
 use embedded_hal_bus::spi::ExclusiveDevice;
 use esp_hal::{gpio::Output, spi::master::SpiDmaBus};
@@ -28,6 +30,38 @@ static FRAMEBUFFER: StaticCell<[u8; FRAMEBUFFER_SIZE]> = StaticCell::new();
 
 type SpiDeviceType = ExclusiveDevice<SpiDmaBus<'static, esp_hal::Async>, Output<'static>, Delay>;
 
+/// Performance metrics for display profiling
+pub struct DisplayMetrics {
+    /// Time to flush via DMA (ms) - most important metric
+    pub flush_ms: u64,
+    /// Frame counter (wraps at u32::MAX)
+    pub frame_count: u32,
+    /// Last frame start timestamp for FPS calculation
+    pub last_frame_start: Option<embassy_time::Instant>,
+    /// Actual FPS (frames per second)
+    pub fps: u32,
+    /// Idle time (ms) - headroom remaining in frame budget
+    pub idle_ms: u64,
+    /// Idle percentage (0-100%) - headroom as % of frame budget
+    pub idle_pct: u32,
+    /// Cached diagnostic text (formatted every 8th frame, drawn every frame)
+    pub cached_text: heapless::String<48>,
+}
+
+impl Default for DisplayMetrics {
+    fn default() -> Self {
+        Self {
+            flush_ms: 0,
+            frame_count: 0,
+            last_frame_start: None,
+            fps: 0,
+            idle_ms: 0,
+            idle_pct: 0,
+            cached_text: heapless::String::new(),
+        }
+    }
+}
+
 /// SSD1351 OLED driver with oscilloscope rendering.
 pub struct DisplayDriver {
     display: GraphicsModeAsync<SPIInterface<SpiDeviceType, Output<'static>>>,
@@ -35,6 +69,7 @@ pub struct DisplayDriver {
     pub cached_waveform: [i16; WAVEFORM_BUFFER_SIZE],
     animation_start: embassy_time::Instant,
     last_flush_ms: u64,
+    pub metrics: DisplayMetrics,
 }
 
 impl DisplayDriver {
@@ -117,6 +152,7 @@ impl DisplayDriver {
             cached_waveform: [0; WAVEFORM_BUFFER_SIZE],
             animation_start: embassy_time::Instant::now(),
             last_flush_ms: 0,
+            metrics: DisplayMetrics::default(),
         }
     }
 
@@ -183,12 +219,20 @@ impl DisplayDriver {
         self.last_flush_ms = (embassy_time::Instant::now() - flush_start).as_millis();
     }
 
-    /// Oscilloscope rendering: average mode with connected lines.
+    /// Oscilloscope rendering: average mode with connected lines + diagnostic overlay.
     ///
-    /// Performance: Drawing to RAM ~10µs (sync), flush via DMA.
+    /// Performance: Drawing to RAM ~10µs (sync), flush via DMA ~13ms.
     pub async fn draw_waveform(&mut self) {
-        static mut FRAME_COUNT: u32 = 0;
-        static mut FLUSH_START_MS: u64 = 0;
+        let frame_start = embassy_time::Instant::now();
+
+        // Calculate FPS from time since last frame
+        if let Some(last_start) = self.metrics.last_frame_start {
+            let frame_interval_ms = (frame_start - last_start).as_millis();
+            if frame_interval_ms > 0 {
+                self.metrics.fps = (1000 / frame_interval_ms) as u32;
+            }
+        }
+        self.metrics.last_frame_start = Some(frame_start);
 
         // Time-based scrolling: constant velocity matching production rate
         self.local_read_index += WAVEFORM_SCROLL_RATE;
@@ -202,27 +246,8 @@ impl DisplayDriver {
         let scroll_pos_int = self.local_read_index as usize;
         let scroll_frac = self.local_read_index - scroll_pos_int as f32;
 
-        // Periodic logging with sample inspection
-        unsafe {
-            FRAME_COUNT += 1;
-            if FRAME_COUNT % 60 == 0 {
-                // Sample a few values from the cached buffer to verify data
-                let s0 = self.cached_waveform[0];
-                let s256 = self.cached_waveform[256];
-                let s512 = self.cached_waveform[512];
-                let s768 = self.cached_waveform[768];
-                log::info!(
-                    "draw: read_idx={}, samples[0,256,512,768]=[{},{},{},{}]",
-                    scroll_pos_int,
-                    s0,
-                    s256,
-                    s512,
-                    s768
-                );
-            }
-        }
-
-        self.display.clear(); // clear to black (only touches RAM)
+        // Clear
+        self.display.clear();
 
         let center_y = (DISPLAY_HEIGHT / 2) as i32;
         let scale = 64.0 / i16::MAX as f32;
@@ -291,21 +316,58 @@ impl DisplayDriver {
             }
         }
 
-        // Flush (ASYNC VERSION)
-        unsafe {
-            FLUSH_START_MS = embassy_time::Instant::now().as_millis();
+        // === Diagnostic overlay (cached text approach) ===
+        // UPDATE formatted string every 8th frame (reduces CPU)
+        // DRAW cached string every frame (no flicker)
+        // IMPORTANT: Must happen BEFORE flush, not after!
+        if self.metrics.frame_count % 8 == 0 {
+            use core::fmt::Write;
+            self.metrics.cached_text.clear();
+            write!(
+                &mut self.metrics.cached_text,
+                "{}fps {}ms {}%",
+                self.metrics.fps,
+                self.metrics.flush_ms,
+                self.metrics.idle_pct,
+            )
+            .ok();
         }
 
+        // Draw cached text every frame (top-left, yellow on green waveform = high contrast)
+        let text_style = MonoTextStyle::new(&FONT_6X9, Rgb565::YELLOW);
+
+        // Line 1: Performance metrics
+        Text::new(&self.metrics.cached_text, Point::new(1, 8), text_style)
+            .draw(&mut self.display)
+            .ok();
+
+        // Line 2: Frame counter (always shows, proves task is alive)
+        let mut counter_buf = heapless::String::<16>::new();
+        use core::fmt::Write;
+        write!(&mut counter_buf, "#{}", self.metrics.frame_count).ok();
+        Text::new(&counter_buf, Point::new(1, 17), text_style)
+            .draw(&mut self.display)
+            .ok();
+
+        // === Flush to hardware ===
+        let flush_start = embassy_time::Instant::now();
         if let Err(e) = self.display.flush().await {
             log::error!("Waveform flush failed: {:?}", e);
         }
+        self.metrics.flush_ms = (embassy_time::Instant::now() - flush_start).as_millis();
 
-        unsafe {
-            FRAME_COUNT += 1;
-            if FRAME_COUNT % 60 == 0 {
-                let duration_ms = embassy_time::Instant::now().as_millis() - FLUSH_START_MS;
-                log::info!("Display flush: {}ms", duration_ms);
-            }
+        // Calculate total work time and idle headroom
+        let work_ms = (embassy_time::Instant::now() - frame_start).as_millis();
+        let frame_budget_ms: u64 = 1000 / DISPLAY_REFRESH_RATE_HZ as u64; // 33ms @ 30Hz
+        self.metrics.idle_ms = frame_budget_ms.saturating_sub(work_ms);
+
+        // Calculate idle as percentage of frame budget (0-100%)
+        // Higher = more headroom = better
+        // 15fps: 50ms/66ms = 75%, 30fps: 17ms/33ms = 51%, 45fps: 6ms/22ms = 27%
+        if frame_budget_ms > 0 {
+            self.metrics.idle_pct = ((self.metrics.idle_ms * 100) / frame_budget_ms) as u32;
         }
+
+        self.metrics.frame_count = self.metrics.frame_count.wrapping_add(1);
     }
 }
