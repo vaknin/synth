@@ -84,7 +84,7 @@ impl Engine {
     pub fn new(receiver: ChannelReceiver, waveform_signal: &'static WaveformSignal) -> Self {
         // Single sine oscillator configured as drone (220Hz A3, full level)
         let mut oscillator = Oscillator::new(Waveform::Sine);
-        oscillator.set_frequency(220.0); // A3 note (220Hz)
+        oscillator.set_frequency(70.0); // A3 note (220Hz)
         oscillator.set_level(1.0); // Always on, full volume
 
         log::info!("Engine::new() - 220Hz sine oscillator initialized");
@@ -171,18 +171,6 @@ impl Engine {
     /// - AUDIO RATE (44.1kHz): Generate samples with audio-rate smoothing
     #[inline]
     async fn render(&mut self, audio_stream: &mut AudioStream) {
-        // DIAGNOSTIC: Disabled for display timing test
-        // #[cfg(not(feature = "profile"))]
-        // {
-        //     static mut FIRST_RENDER: bool = true;
-        //     unsafe {
-        //         if FIRST_RENDER {
-        //             FIRST_RENDER = false;
-        //             log::info!("Audio: render() called, awaiting I2S DMA buffer...");
-        //         }
-        //     }
-        // }
-
         let bytes_written = audio_stream
             .push_with(|buffer| {
                 if buffer.len() < 4 {
@@ -220,9 +208,6 @@ impl Engine {
                         self.waveform_capture.send_counter += 1;
 
                         // Send periodically: adaptive rate (2× display refresh for smooth updates)
-                        // At 30Hz display: send every 81 samples (~60 Hz)
-                        // At 45Hz display: send every 54 samples (~90 Hz)
-                        // At 60Hz display: send every 40 samples (~120 Hz)
                         if self.waveform_capture.send_counter >= WAVEFORM_SEND_INTERVAL {
                             self.waveform_capture.send_counter = 0;
 
@@ -241,21 +226,6 @@ impl Engine {
                 }
 
                 let bytes_written = buffer.len() - (buffer.len() % 4);
-
-                // DIAGNOSTIC: Disabled for display timing test
-                // #[cfg(not(feature = "profile"))]
-                // {
-                //     static mut DIAG_COUNTER: u32 = 0;
-                //     unsafe {
-                //         DIAG_COUNTER += 1;
-                //         if DIAG_COUNTER >= 172 {
-                //             DIAG_COUNTER = 0;
-                //             log::info!("Audio: sample={}, write_idx={}",
-                //                 last_sample_i16, self.waveform_capture.write_index);
-                //         }
-                //     }
-                // }
-
                 bytes_written
             })
             .await

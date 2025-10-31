@@ -164,7 +164,7 @@ pub const POT_CHANGE_THRESHOLD: f32 = 0.0005;
 pub const POT_EXPONENT_SCALE: i32 = 2;
 
 /// Minimum frequency target for potentiometer control (Hz).
-pub const FREQUENCY_MIN: f32 = 4.0;
+pub const FREQUENCY_MIN: f32 = 25.0;
 
 /// Maximum frequency target for potentiometer control (Hz).
 pub const FREQUENCY_MAX: f32 = 768.0;
@@ -243,7 +243,7 @@ pub const DISPLAY_WIDTH: u32 = 128;
 pub const DISPLAY_HEIGHT: u32 = 128;
 
 /// Display refresh rate (supported range: 15-60Hz, optimal: 30-45Hz)
-pub const DISPLAY_REFRESH_RATE_HZ: u32 = 15;
+pub const DISPLAY_REFRESH_RATE_HZ: u32 = 30;
 
 /// Using IOMUX pins (GPIO10/11/12) for optimal high-speed performance.
 /// Note: Exceeds datasheet spec - test stability thoroughly. Use 20_000_000 for safe mode.

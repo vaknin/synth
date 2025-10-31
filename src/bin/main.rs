@@ -55,24 +55,15 @@ async fn main(spawner: Spawner) {
     // Waveform Signal reference (shared across cores)
     let waveform_signal: &'static WaveformSignal = &WAVEFORM_SIGNAL;
 
-    // Initialize I2S audio hardware (Core 0: DMA_CH0)
-    #[allow(clippy::manual_div_ceil)]
-    let (_, _, tx_buffer, tx_descriptors) = dma_circular_buffers!(0, DMA_BUFFER_SIZE);
-
-    log::info!("Setting up I2S audio (Core 0, DMA_CH0)...");
-    let mut audio_stream: AudioStream = hardware::setup_audio(
-        peripherals.I2S0,
-        peripherals.DMA_CH0,
-        peripherals.GPIO35, // WS
-        peripherals.GPIO36, // DOUT
-        peripherals.GPIO37, // BCLK
-        tx_buffer,
-        tx_descriptors,
-    );
-    log::info!("I2S audio ready");
-
     // Extract CPU_CTRL FIRST before moving any other peripherals
     let cpu_ctrl = peripherals.CPU_CTRL;
+
+    // Extract I2S peripherals (will be initialized AFTER Core 1 starts)
+    let i2s0 = peripherals.I2S0;
+    let dma_ch0 = peripherals.DMA_CH0;
+    let gpio35 = peripherals.GPIO35;
+    let gpio36 = peripherals.GPIO36;
+    let gpio37 = peripherals.GPIO37;
 
     // Extract raw ADC peripherals (will be initialized on Core 1 inside pot_task)
     let adc1 = peripherals.ADC1;
@@ -117,31 +108,47 @@ async fn main(spawner: Spawner) {
                 log::info!("Core 1 executor started");
 
                 // Spawn pot_task with raw peripherals (ADC init happens inside task on Core 1)
-                log::info!("Spawning pot_task...");
-                spawner
-                    .spawn(synth::controls::task::pot_task(
-                        producer, adc1, gpio1, gpio2,
-                    ))
-                    .expect("Failed to spawn pot task on Core 1");
-                log::info!("pot_task spawned");
+                // log::info!("Spawning pot_task...");
+                // spawner
+                //     .spawn(synth::controls::task::pot_task(
+                //         producer, adc1, gpio1, gpio2,
+                //     ))
+                //     .expect("Failed to spawn pot task on Core 1");
+                // log::info!("pot_task spawned");
 
                 // Spawn waveform display task on Core 1 (converts blocking SPI to async on Core 1)
-                log::info!("Spawning display_task...");
-                spawner
-                    .spawn(synth::display::task::display_task(
-                        spi,
-                        cs,
-                        dc,
-                        rst,
-                        waveform_signal,
-                    ))
-                    .expect("Failed to spawn display task on Core 1");
-                log::info!("display_task spawned");
+                // log::info!("Spawning display_task...");
+                // spawner
+                //     .spawn(synth::display::task::display_task(
+                //         spi,
+                //         cs,
+                //         dc,
+                //         rst,
+                //         waveform_signal,
+                //     ))
+                //     .expect("Failed to spawn display task on Core 1");
+                // log::info!("display_task spawned");
 
                 log::info!("Core 1: Both tasks spawned successfully");
             });
         },
     );
+
+    // Core 0 (PRO_CPU) continues here - initialize audio hardware AFTER Core 1 started
+    #[allow(clippy::manual_div_ceil)]
+    let (_, _, tx_buffer, tx_descriptors) = dma_circular_buffers!(0, DMA_BUFFER_SIZE);
+
+    log::info!("Setting up I2S audio (Core 0, DMA_CH0)...");
+    let mut audio_stream: AudioStream = hardware::setup_audio(
+        i2s0,
+        dma_ch0,
+        gpio35,
+        gpio36,
+        gpio37,
+        tx_buffer,
+        tx_descriptors,
+    );
+    log::info!("I2S audio ready");
 
     log::info!("Core 0: Initializing Engine...");
     let mut engine = Engine::new(consumer, waveform_signal);
