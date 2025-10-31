@@ -78,9 +78,9 @@ async fn main(_spawner: Spawner) {
             let executor = EXECUTOR.init(esp_hal_embassy::Executor::new());
             executor.run(|spawner| {
                 // Spawn pot task on Core 1
-                spawner
-                    .spawn(synth::controls::pot_task(producer, adc_bus, pins))
-                    .ok();
+                // spawner
+                //     .spawn(synth::controls::pot_task(producer, adc_bus, pins))
+                //     .ok();
             });
         })
         .unwrap();
