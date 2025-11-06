@@ -6,6 +6,7 @@ use embassy_executor::Spawner;
 use embassy_time::{Duration, Timer};
 use esp_hal::clock::CpuClock;
 use esp_hal::timer::timg::TimerGroup;
+use synth::display;
 use {esp_backtrace as _, esp_println as _};
 
 esp_bootloader_esp_idf::esp_app_desc!();
@@ -18,12 +19,10 @@ async fn main(spawner: Spawner) -> ! {
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     esp_rtos::start(timg0.timer0);
 
-    info!("Embassy initialized!");
-
     // TODO: Spawn some tasks
     let _ = spawner;
 
-    info!("Hello world!");
+    display::say_hello();
     loop {
         Timer::after(Duration::from_secs(1)).await;
     }
