@@ -1,0 +1,16 @@
+# rust-analyzer configuration for ESP32-S3 embedded project
+# This prevents rust-analyzer from checking test targets which don't exist for no_std
+
+[cargo]
+# Specify the target triple for this embedded project
+target = "xtensa-esp32s3-none-elf"
+
+[check]
+# Don't check all targets (prevents checking for test crate which doesn't exist in no_std)
+allTargets = false
+
+[checkOnSave]
+# Also disable allTargets for the check-on-save feature
+allTargets = false
+# Pass the target explicitly to cargo check
+extraArgs = ["--target", "xtensa-esp32s3-none-elf"]
