@@ -326,9 +326,7 @@ impl DisplayDriver {
             write!(
                 &mut self.metrics.cached_text,
                 "{}fps {}ms {}%",
-                self.metrics.fps,
-                self.metrics.flush_ms,
-                self.metrics.idle_pct,
+                self.metrics.fps, self.metrics.flush_ms, self.metrics.idle_pct,
             )
             .ok();
         }

@@ -31,7 +31,7 @@ type I2sDoutGpio = esp_hal::peripherals::GPIO36<'static>;
 // SPI Display peripheral type aliases (SSD1351 OLED)
 type Spi2Peripheral = esp_hal::peripherals::SPI2<'static>;
 type DmaChannel1 = esp_hal::peripherals::DMA_CH1<'static>;
-type SpiDcGpio = esp_hal::peripherals::GPIO9<'static>; // DC (data/command select)
+type SpiDcGpio = esp_hal::peripherals::GPIO14<'static>; // DC (data/command select)
 type SpiCsGpio = esp_hal::peripherals::GPIO10<'static>; // CS (chip select)
 type SpiMosiGpio = esp_hal::peripherals::GPIO11<'static>; // MOSI (DIN on display)
 type SpiSckGpio = esp_hal::peripherals::GPIO12<'static>; // SCK (CLK on display)
@@ -52,19 +52,17 @@ adc_pins! {
 /// Configures I2S in Philips standard stereo mode (16-bit samples),
 /// sets up circular DMA transfer, and returns transaction ready for push_with().
 ///
-/// # Pin Configuration (Non-ADC GPIOs)
-/// - WS/LRCK (word select) => GPIO35
-/// - DOUT/DIN (data out) => GPIO36
-/// - BCLK (bit clock) => GPIO37
-///
-/// GPIO 35/36/37 have no ADC capability and don't conflict with I2C/SPI peripherals.
+/// # PCM5102A Pin Configuration
+/// - LCK (left/right clock)
+/// - DIN (data in)
+/// - BCK (bit clock)
 ///
 /// # Arguments
 /// * `i2s0` - I2S0 peripheral
 /// * `dma_channel` - DMA channel for circular buffer
-/// * `ws_gpio` - WS/LCK pin
-/// * `dout_gpio` - DOUT/DIN pin
-/// * `bclk_gpio` - BCLK pin
+/// * `ws_gpio` - LCK pin
+/// * `dout_gpio` - DIN pin
+/// * `bclk_gpio` - BCK pin
 /// * `tx_buffer` - DMA transmit buffer (from dma_circular_buffers! macro)
 /// * `tx_descriptors` - DMA descriptors (from dma_circular_buffers! macro)
 ///
@@ -96,6 +94,12 @@ pub fn setup_audio(
     .with_dout(dout_gpio)
     .build(tx_descriptors);
 
+    log::info!(
+        "I2S configured: TDM Philips, 16-bit stereo, {}Hz, buffer={}KB",
+        SAMPLE_RATE,
+        tx_buffer.len() / 1024
+    );
+
     i2s_tx.write_dma_circular_async(tx_buffer).unwrap()
 }
 
@@ -109,7 +113,7 @@ pub fn setup_audio(
 /// - DIN/MOSI => GPIO11 (SPI2 MOSI)
 /// - CLK/SCK => GPIO12 (SPI2 SCK)
 /// - CS => GPIO10 (chip select)
-/// - DC => GPIO9 (data/command select)
+/// - DC => GPIO14 (data/command select)
 /// - RST => GPIO13 (reset)
 ///
 /// # Returns
