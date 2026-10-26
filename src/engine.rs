@@ -174,7 +174,7 @@ impl Engine {
         let bytes_written = audio_stream
             .push_with(|buffer| {
                 if buffer.len() < 4 {
-                    return 0;
+                    return 0; // Buffer not ready yet (normal for circular DMA)
                 }
 
                 // === BUFFER RATE: Update parameters once per buffer ===
@@ -182,6 +182,11 @@ impl Engine {
 
                 // Cache soft-start gain (settles in ~10ms, then no-op via settled flag)
                 let fade_gain = self.soft_start_gain.value();
+
+                static mut SAMPLE_COUNTER: u32 = 0;
+                static mut FIRST_NONZERO_SAMPLE: Option<i16> = None;
+                static mut FIRST_WRITE_LOGGED: bool = false;
+                static mut LATEST_SAMPLE: i16 = 0;
 
                 // === AUDIO RATE: Process each stereo frame ===
                 for chunk in buffer.chunks_exact_mut(4) {
@@ -191,6 +196,16 @@ impl Engine {
                     // Apply soft-start fade, master gain, convert to i16
                     let output = (sample * fade_gain * MASTER_GAIN * I16_MAX_F32) as i16;
                     let bytes = output.to_le_bytes();
+
+                    // Capture first non-zero sample and track latest
+                    unsafe {
+                        if FIRST_NONZERO_SAMPLE.is_none() && output != 0 {
+                            FIRST_NONZERO_SAMPLE = Some(output);
+                            log::info!("First non-zero sample: {}", output);
+                        }
+                        LATEST_SAMPLE = output;
+                        SAMPLE_COUNTER += 1;
+                    }
 
                     // Write stereo (duplicate mono to both channels)
                     // Direct assignment is faster than copy_from_slice for 4 bytes
@@ -226,6 +241,26 @@ impl Engine {
                 }
 
                 let bytes_written = buffer.len() - (buffer.len() % 4);
+
+                // Log first successful write and periodically
+                unsafe {
+                    if !FIRST_WRITE_LOGGED && bytes_written > 0 {
+                        log::info!("I2S: FIRST write successful! {} bytes", bytes_written);
+                        FIRST_WRITE_LOGGED = true;
+                    }
+
+                    // Log every ~2 seconds
+                    if SAMPLE_COUNTER % (44100 * 2) == 0 && SAMPLE_COUNTER > 0 {
+                        log::info!(
+                            "I2S: {} bytes/buffer, latest_sample={}, first_nonzero={:?}, total={}",
+                            bytes_written,
+                            LATEST_SAMPLE,
+                            FIRST_NONZERO_SAMPLE,
+                            SAMPLE_COUNTER
+                        );
+                    }
+                }
+
                 bytes_written
             })
             .await
