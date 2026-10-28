@@ -61,9 +61,9 @@ async fn main(spawner: Spawner) {
     // Extract I2S peripherals (will be initialized AFTER Core 1 starts)
     let i2s0 = peripherals.I2S0;
     let dma_ch0 = peripherals.DMA_CH0;
-    let gpio35 = peripherals.GPIO35;
-    let gpio36 = peripherals.GPIO36;
-    let gpio37 = peripherals.GPIO37;
+    let gpio35 = peripherals.GPIO35; // LCK
+    let gpio36 = peripherals.GPIO36; // DIN
+    let gpio37 = peripherals.GPIO37; // BCK
 
     // Extract raw ADC peripherals (will be initialized on Core 1 inside pot_task)
     let adc1 = peripherals.ADC1;
@@ -76,7 +76,7 @@ async fn main(spawner: Spawner) {
     let (spi, cs, dc, rst) = hardware::setup_spi_display(
         peripherals.SPI2,
         peripherals.DMA_CH1,
-        peripherals.GPIO9,  // DC
+        peripherals.GPIO14, // DC
         peripherals.GPIO10, // CS
         peripherals.GPIO11, // MOSI
         peripherals.GPIO12, // SCK
@@ -117,19 +117,19 @@ async fn main(spawner: Spawner) {
                 // log::info!("pot_task spawned");
 
                 // Spawn waveform display task on Core 1 (converts blocking SPI to async on Core 1)
-                // log::info!("Spawning display_task...");
-                // spawner
-                //     .spawn(synth::display::task::display_task(
-                //         spi,
-                //         cs,
-                //         dc,
-                //         rst,
-                //         waveform_signal,
-                //     ))
-                //     .expect("Failed to spawn display task on Core 1");
-                // log::info!("display_task spawned");
+                log::info!("Spawning display_task...");
+                spawner
+                    .spawn(synth::display::task::display_task(
+                        spi,
+                        cs,
+                        dc,
+                        rst,
+                        waveform_signal,
+                    ))
+                    .expect("Failed to spawn display task on Core 1");
+                log::info!("display_task spawned");
 
-                log::info!("Core 1: Both tasks spawned successfully");
+                // log::info!("Core 1: Both tasks spawned successfully");
             });
         },
     );
@@ -142,9 +142,9 @@ async fn main(spawner: Spawner) {
     let mut audio_stream: AudioStream = hardware::setup_audio(
         i2s0,
         dma_ch0,
-        gpio35,
-        gpio36,
-        gpio37,
+        gpio35, // LCK (param order: lck, din, bck)
+        gpio36, // DIN
+        gpio37, // BCK
         tx_buffer,
         tx_descriptors,
     );
@@ -154,8 +154,21 @@ async fn main(spawner: Spawner) {
     let mut engine = Engine::new(consumer, waveform_signal);
     log::info!("Core 0: Engine ready, entering audio loop");
 
+    // Log once before entering loop
+    static mut LOOP_COUNTER: u32 = 0;
+
     // Core 0 main loop: audio rendering with I2S DMA
     loop {
         engine.stream_audio(&mut audio_stream).await;
+
+        unsafe {
+            LOOP_COUNTER += 1;
+            if LOOP_COUNTER == 1 {
+                log::info!("Core 0: Audio loop running (first iteration)");
+            }
+            if LOOP_COUNTER % 1000 == 0 {
+                log::info!("Core 0: Audio loop iteration {}", LOOP_COUNTER);
+            }
+        }
     }
 }
