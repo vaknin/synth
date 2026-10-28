@@ -57,9 +57,9 @@ Audio synthesizer with oscillators, filters, LFOs, and real-time OLED waveform v
 - Root cause: Executor spawn stack frame is small, separate from task execution stack
 
 **GPIO (Phase 1):**
-- I2S: GPIO35/36/37 (safe on N16R8)
+- I2S: GPIO7 (BCLK), GPIO8 (WS), GPIO9 (DOUT) - safe on N16R8 (GPIO35-37 reserved for Octal PSRAM)
 - Pots: GPIO1 (cutoff), GPIO2 (resonance)
-- Display: GPIO9-13 (SPI2, 20 MHz, SSD1351 128×128 OLED)
+- Display: GPIO10-14 (SPI2, 20 MHz, SSD1351 128×128 OLED) - DC on GPIO14, CS/MOSI/SCK/RST on GPIO10-13
   - **SPI Pattern**: `embedded-hal-bus::ExclusiveDevice` (not Embassy `shared_bus`) - idiomatic for single-device SPI
     - Direct SPI ownership, zero mutex overhead
     - CS auto-managed by ExclusiveDevice wrapper
