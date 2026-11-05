@@ -248,7 +248,7 @@ pub const DISPLAY_REFRESH_RATE_HZ: u32 = 30;
 /// Using IOMUX pins (GPIO10/11/12) for optimal high-speed performance.
 /// Note: Exceeds datasheet spec - test stability thoroughly. Use 20_000_000 for safe mode.
 /// 23Mhz seems to work fine and around the limit, 23.5mhz is corrupted
-pub const DISPLAY_SPI_FREQUENCY_HZ: u32 = 23_250_000;
+pub const DISPLAY_SPI_FREQUENCY_HZ: u32 = 20_250_000;
 
 // === Waveform Visualization ===
 
